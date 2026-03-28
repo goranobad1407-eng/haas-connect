@@ -1,0 +1,1 @@
+{"default":{"identifier":"default","description":"Default permissions for HAAS CNC Connect. All filesystem operations are handled by custom Rust commands — no built-in fs plugin permissions required.","local":true,"windows":["main"],"permissions":["core:default","dialog:default","core:window:allow-start-dragging","core:app:allow-version","core:app:allow-name"]}}

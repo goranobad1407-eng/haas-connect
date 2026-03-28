@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>HAAS CNC Connect</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <div id="app">
+      <!-- Header -->
+      <header id="header">
+        <span class="app-title">HAAS CNC Connect</span>
+        <span id="status-indicator" class="status-idle">Ready</span>
+      </header>
+
+      <!-- Main layout: three panels -->
+      <main id="main-layout">
+        <!-- Left: machine list -->
+        <aside id="machine-panel">
+          <div class="panel-header" data-i18n="panel.machines">Machines</div>
+          <div id="machine-list"></div>
+          <div class="panel-footer">
+            <button id="btn-settings" class="btn-ghost" title="Open machine settings" data-i18n="btn.machineSettings">
+              Machine Settings
+            </button>
+            <button id="btn-app-settings" class="btn-ghost btn-app-settings-footer" title="Open app settings" data-i18n="btn.appSettings">
+              App Settings
+            </button>
+          </div>
+        </aside>
+
+        <!-- Center: transfer browser -->
+        <section id="browser-panel">
+          <div id="transfer-workspace">
+            <section class="transfer-pane">
+              <div class="pane-toolbar">
+                <div class="pane-heading">
+                  <span class="pane-title" data-i18n="pane.machine">Machine</span>
+                  <span id="machine-pane-status" class="pane-subtitle">Select a machine</span>
+                </div>
+                <div class="pane-actions">
+                  <button id="btn-copy-to-local" class="btn-ghost btn-inline" type="button" disabled data-i18n="btn.copyToLocal">
+                    Copy to local
+                  </button>
+                </div>
+              </div>
+              <div id="machine-breadcrumb" class="pane-breadcrumb">Select a machine from the left panel</div>
+              <div class="pane-list-container">
+                <div id="machine-file-list-placeholder" class="placeholder-text">
+                  Select a machine from the left panel
+                </div>
+                <ul id="machine-file-list" hidden></ul>
+              </div>
+            </section>
+
+            <section class="transfer-pane">
+              <div class="pane-toolbar">
+                <div class="pane-heading">
+                  <span class="pane-title" data-i18n="pane.local">Local</span>
+                  <span id="local-pane-status" class="pane-subtitle">Choose a local work folder</span>
+                </div>
+                <div class="pane-actions">
+                  <button id="btn-choose-local-folder" class="btn-ghost btn-inline" type="button" data-i18n="btn.chooseFolder">
+                    Choose Folder
+                  </button>
+                  <button id="btn-copy-to-machine" class="btn-primary btn-inline" type="button" disabled data-i18n="btn.copyToMachine">
+                    Copy to machine
+                  </button>
+                </div>
+              </div>
+              <div id="local-breadcrumb" class="pane-breadcrumb">Choose a local work folder</div>
+              <div class="pane-list-container">
+                <div id="local-file-list-placeholder" class="placeholder-text">
+                  Choose a local work folder to browse CNC files.
+                </div>
+                <ul id="local-file-list" hidden></ul>
+              </div>
+            </section>
+          </div>
+        </section>
+
+        <!-- Right: preview pane -->
+        <aside id="preview-panel">
+          <div class="panel-header" data-i18n="panel.preview">Preview</div>
+          <div id="preview-content">
+            <div id="preview-placeholder" class="placeholder-text">
+              Select a file to preview
+            </div>
+            <div id="preview-data" hidden>
+              <div id="preview-title"></div>
+              <div id="preview-metadata"></div>
+              <pre id="preview-text-content" hidden></pre>
+              <div id="preview-actions"></div>
+            </div>
+          </div>
+        </aside>
+      </main>
+
+      <!-- Status bar -->
+      <footer id="status-bar">
+        <span id="status-message">Ready</span>
+      </footer>
+    </div>
+
+    <!-- Machine Settings modal -->
+    <div id="settings-modal" class="modal-overlay" hidden>
+      <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+        <div class="modal-header">
+          <div>
+            <div id="settings-title" class="modal-title" data-i18n="settings.machine.title">Machine Settings</div>
+            <div class="modal-subtitle">
+              <span data-i18n="settings.machine.subtitle">Edit machine profiles stored in</span>
+              <span id="settings-config-path">machines.json</span>
+            </div>
+          </div>
+          <button id="btn-settings-close" class="btn-ghost btn-inline" type="button" data-i18n="btn.close">Close</button>
+        </div>
+
+        <div class="modal-body">
+          <aside class="settings-sidebar">
+            <div class="settings-toolbar">
+              <button id="btn-machine-add" class="btn-ghost btn-inline" type="button" data-i18n="btn.add">Add</button>
+              <button id="btn-machine-duplicate" class="btn-ghost btn-inline" type="button" data-i18n="btn.duplicate">Duplicate</button>
+              <button id="btn-machine-remove" class="btn-ghost btn-inline btn-danger" type="button" data-i18n="btn.remove">Remove</button>
+            </div>
+            <div id="settings-machine-list" class="settings-machine-list"></div>
+          </aside>
+
+          <section class="settings-editor">
+            <div id="settings-empty" class="placeholder-text" data-i18n="settings.machine.empty">
+              Add a machine or select one from the list.
+            </div>
+
+            <form id="settings-form" class="settings-form" hidden>
+              <label class="settings-field">
+                <span data-i18n="settings.machine.id">ID</span>
+                <input id="machine-id" type="text" autocomplete="off" />
+              </label>
+
+              <label class="settings-field">
+                <span data-i18n="settings.machine.name">Name</span>
+                <input id="machine-name" type="text" autocomplete="off" />
+              </label>
+
+              <div class="settings-grid">
+                <label class="settings-field">
+                  <span data-i18n="settings.machine.locationType">Location Type</span>
+                  <select id="machine-location-type">
+                    <option value="local" data-i18n="settings.machine.location.local">Local</option>
+                    <option value="network_share" data-i18n="settings.machine.location.networkShare">Network Share</option>
+                    <option value="usb" data-i18n="settings.machine.location.usb">USB</option>
+                  </select>
+                </label>
+
+                <label class="settings-field settings-checkbox">
+                  <span data-i18n="settings.machine.protected">Protected</span>
+                  <input id="machine-protected" type="checkbox" />
+                </label>
+              </div>
+
+              <label class="settings-field">
+                <span data-i18n="settings.machine.path">Path</span>
+                <input id="machine-path" type="text" autocomplete="off" />
+              </label>
+
+              <label class="settings-field">
+                <span data-i18n="settings.machine.extensions">Allowed Extensions</span>
+                <div class="settings-inline-row">
+                  <input
+                    id="machine-extensions"
+                    type="text"
+                    autocomplete="off"
+                    placeholder=".nc, .tap, .txt, .pdf"
+                    data-i18n-placeholder="settings.machine.extensionsPlaceholder"
+                  />
+                  <button id="btn-extension-presets" class="btn-ghost btn-inline" type="button" data-i18n="settings.machine.cncPreset">
+                    CNC Preset
+                  </button>
+                </div>
+              </label>
+
+              <label class="settings-field">
+                <span data-i18n="settings.machine.notes">Notes</span>
+                <textarea id="machine-notes" rows="4"></textarea>
+              </label>
+
+              <div class="settings-inline-row">
+                <button id="btn-machine-test" class="btn-ghost btn-inline" type="button" data-i18n="btn.testAvailability">
+                  Test Availability
+                </button>
+              </div>
+            </form>
+
+            <div id="settings-message" class="settings-message"></div>
+            <ul id="settings-validation-list" class="settings-validation-list"></ul>
+          </section>
+        </div>
+
+        <div class="modal-footer">
+          <button id="btn-settings-cancel" class="btn-ghost btn-inline" type="button" data-i18n="btn.cancel">Cancel</button>
+          <button id="btn-settings-save" class="btn-primary" type="button" data-i18n="btn.saveMachineSettings">Save Machine Settings</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- App Settings modal -->
+    <div id="app-settings-modal" class="modal-overlay" hidden>
+      <div class="modal-card modal-card-small" role="dialog" aria-modal="true" aria-labelledby="app-settings-title">
+        <div class="modal-header">
+          <div id="app-settings-title" class="modal-title" data-i18n="settings.app.title">App Settings</div>
+          <button id="btn-app-settings-close" class="btn-ghost btn-inline" type="button" data-i18n="btn.close">Close</button>
+        </div>
+
+        <div class="modal-body-simple">
+          <label class="settings-field">
+            <span data-i18n="settings.app.defaultLocalPath">Default Local Folder</span>
+            <div class="settings-inline-row">
+              <input
+                id="app-default-local-path"
+                type="text"
+                autocomplete="off"
+                placeholder="e.g. C:\CNC\Programs"
+                data-i18n-placeholder="settings.app.defaultLocalPathPlaceholder"
+              />
+              <button id="btn-browse-local-path" class="btn-ghost btn-inline" type="button" data-i18n="btn.browse">
+                Browse…
+              </button>
+            </div>
+          </label>
+
+          <label class="settings-field">
+            <span data-i18n="settings.app.language">Language</span>
+            <select id="app-language">
+              <option value="en">English</option>
+              <option value="hr">Hrvatski</option>
+            </select>
+          </label>
+
+          <div id="app-settings-message" class="settings-message"></div>
+        </div>
+
+        <div class="modal-footer">
+          <button id="btn-app-settings-cancel" class="btn-ghost btn-inline" type="button" data-i18n="btn.cancel">Cancel</button>
+          <button id="btn-app-settings-save" class="btn-primary" type="button" data-i18n="btn.saveAppSettings">Save Settings</button>
+        </div>
+      </div>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
