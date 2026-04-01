@@ -6,3 +6,5 @@ portable-build
 .claude
 *.log
 .DS_Store
+/HAAS CNC Connect_*_x64-setup.exe
+/logo_metalobad.png

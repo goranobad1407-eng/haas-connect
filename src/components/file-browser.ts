@@ -1,6 +1,6 @@
 import { open } from "@tauri-apps/plugin-dialog";
 
-import { listDirectory, transferFile } from "../api";
+import { deleteDirectoryContents, deleteEntry, listDirectory, openExternal, transferFile } from "../api";
 import { state } from "../state";
 import { t, applyStaticLabels } from "../translations";
 import type {
@@ -21,6 +21,10 @@ const machineStatusEl = () =>
   document.getElementById("machine-pane-status") as HTMLSpanElement;
 const copyToLocalButton = () =>
   document.getElementById("btn-copy-to-local") as HTMLButtonElement;
+const deleteMachineEntryButton = () =>
+  document.getElementById("btn-delete-machine-entry") as HTMLButtonElement;
+const deleteMachineFolderContentsButton = () =>
+  document.getElementById("btn-delete-machine-folder-contents") as HTMLButtonElement;
 
 const localListEl = () =>
   document.getElementById("local-file-list") as HTMLUListElement;
@@ -32,8 +36,34 @@ const localStatusEl = () =>
   document.getElementById("local-pane-status") as HTMLSpanElement;
 const chooseLocalFolderButton = () =>
   document.getElementById("btn-choose-local-folder") as HTMLButtonElement;
+const openLocalEntryButton = () =>
+  document.getElementById("btn-open-local-entry") as HTMLButtonElement;
+const localBackButton = () =>
+  document.getElementById("btn-local-back") as HTMLButtonElement;
+const localForwardButton = () =>
+  document.getElementById("btn-local-forward") as HTMLButtonElement;
+const localUpButton = () =>
+  document.getElementById("btn-local-up") as HTMLButtonElement;
 const copyToMachineButton = () =>
   document.getElementById("btn-copy-to-machine") as HTMLButtonElement;
+const appRootEl = () =>
+  document.getElementById("app") as HTMLElement;
+const browserPanelEl = () =>
+  document.getElementById("browser-panel") as HTMLElement;
+const previewPanelEl = () =>
+  document.getElementById("preview-panel") as HTMLElement;
+const contextMenuEl = () =>
+  document.getElementById("file-context-menu") as HTMLDivElement;
+const contextMenuDeleteButton = () =>
+  document.getElementById("context-menu-delete") as HTMLButtonElement;
+const contextMenuEditButton = () =>
+  document.getElementById("context-menu-edit") as HTMLButtonElement;
+
+const LOCAL_EDITABLE_EXTENSIONS = new Set([".nc", ".tap", ".cnc", ".txt"]);
+type LocalNavigationEntry = { path: string; breadcrumb: string[] };
+let contextMenuTarget: { pane: PaneKind; entry: BrowserEntry } | null = null;
+let localNavigationHistory: LocalNavigationEntry[] = [];
+let localNavigationIndex = -1;
 
 function buildPath(base: string, crumbs: string[]): string {
   let path = base.replace(/\\/g, "/").replace(/\/$/, "");
@@ -70,6 +100,53 @@ function getBreadcrumb(pane: PaneKind): string[] {
   return pane === "machine"
     ? state.get("machine_breadcrumb")
     : state.get("local_breadcrumb");
+}
+
+function isLocalExternallyOpenable(
+  entry: BrowserEntry | null | undefined
+): entry is BrowserEntry {
+  return !!entry && !entry.is_dir && LOCAL_EDITABLE_EXTENSIONS.has(entry.extension);
+}
+
+function resetLocalNavigationHistory(): void {
+  localNavigationHistory = [];
+  localNavigationIndex = -1;
+}
+
+function recordLocalNavigation(path: string, breadcrumb: string[]): void {
+  const current = localNavigationHistory[localNavigationIndex];
+  if (current?.path === path) {
+    current.breadcrumb = [...breadcrumb];
+    return;
+  }
+
+  localNavigationHistory = localNavigationHistory.slice(0, localNavigationIndex + 1);
+  localNavigationHistory.push({
+    path,
+    breadcrumb: [...breadcrumb],
+  });
+  localNavigationIndex = localNavigationHistory.length - 1;
+}
+
+function updateLocalNavigationButtons(): void {
+  const hasRoot = !!state.get("local_root");
+  const canGoBack = localNavigationIndex > 0;
+  const canGoForward =
+    localNavigationIndex >= 0 &&
+    localNavigationIndex < localNavigationHistory.length - 1;
+  const canGoUp = hasRoot && state.get("local_breadcrumb").length > 0;
+
+  localBackButton().disabled = !canGoBack;
+  localForwardButton().disabled = !canGoForward;
+  localUpButton().disabled = !canGoUp;
+}
+
+async function openLocalEntryExternally(entry: BrowserEntry): Promise<void> {
+  try {
+    await openExternal(entry.path);
+  } catch (error) {
+    setStatus(t("preview.openError", { error: String(error) }));
+  }
 }
 
 function clearPaneSelection(pane: PaneKind): void {
@@ -175,6 +252,7 @@ function buildEntryItem(pane: PaneKind, entry: BrowserEntry): HTMLLIElement {
   const row = document.createElement("li");
   row.className = entry.is_dir ? "entry-dir" : "entry-file";
   row.dataset.path = entry.path;
+  row.dataset.pane = pane;
 
   const icon = document.createElement("span");
   icon.className = "entry-icon";
@@ -192,19 +270,22 @@ function buildEntryItem(pane: PaneKind, entry: BrowserEntry): HTMLLIElement {
   row.append(icon, name, meta);
 
   row.addEventListener("click", () => {
-    if (!entry.is_dir) {
-      selectEntry(pane, entry, row);
-    }
+    selectEntry(pane, entry, row);
   });
 
   row.addEventListener("dblclick", () => {
-    if (!entry.is_dir) return;
+    if (entry.is_dir) {
+      const nextBreadcrumb = [...getBreadcrumb(pane), entry.name];
+      if (pane === "machine") {
+        void loadMachineDirectory(entry.path, nextBreadcrumb);
+      } else {
+        void loadLocalDirectory(entry.path, nextBreadcrumb);
+      }
+      return;
+    }
 
-    const nextBreadcrumb = [...getBreadcrumb(pane), entry.name];
-    if (pane === "machine") {
-      void loadMachineDirectory(entry.path, nextBreadcrumb);
-    } else {
-      void loadLocalDirectory(entry.path, nextBreadcrumb);
+    if (pane === "local" && isLocalExternallyOpenable(entry)) {
+      void openLocalEntryExternally(entry);
     }
   });
 
@@ -240,9 +321,214 @@ function clearPaneSelectionVisual(pane: PaneKind): void {
   }
 }
 
+function clearMachineSelectionAfterDelete(): void {
+  const active = state.get("active_selection");
+  const clearMachinePreview = active?.pane === "machine";
+
+  state.patch({
+    selected_machine_entry: null,
+    ...(clearMachinePreview
+      ? {
+          active_selection: null,
+          preview: null,
+        }
+      : {}),
+  });
+  clearPaneSelectionVisual("machine");
+}
+
+function canDeleteViaContextMenu(
+  pane: PaneKind,
+  _entry: BrowserEntry
+): boolean {
+  if (pane === "local") {
+    return true;
+  }
+
+  const machine = state.get("selected_machine");
+  return !!machine && !machine.protected;
+}
+
+function canEditViaContextMenu(
+  pane: PaneKind,
+  entry: BrowserEntry
+): boolean {
+  return (
+    pane === "local" &&
+    !entry.is_dir &&
+    LOCAL_EDITABLE_EXTENSIONS.has(entry.extension)
+  );
+}
+
+function hideContextMenu(): void {
+  contextMenuTarget = null;
+  contextMenuEl().hidden = true;
+}
+
+function showContextMenu(
+  x: number,
+  y: number,
+  pane: PaneKind,
+  entry: BrowserEntry
+): void {
+  const canDelete = canDeleteViaContextMenu(pane, entry);
+  const canEdit = canEditViaContextMenu(pane, entry);
+
+  if (!canDelete && !canEdit) {
+    hideContextMenu();
+    return;
+  }
+
+  const menu = contextMenuEl();
+  contextMenuTarget = { pane, entry };
+
+  contextMenuDeleteButton().hidden = !canDelete;
+  contextMenuEditButton().hidden = !canEdit;
+
+  menu.hidden = false;
+
+  const menuRect = menu.getBoundingClientRect();
+  const maxLeft = Math.max(8, window.innerWidth - menuRect.width - 8);
+  const maxTop = Math.max(8, window.innerHeight - menuRect.height - 8);
+  menu.style.left = `${Math.min(x, maxLeft)}px`;
+  menu.style.top = `${Math.min(y, maxTop)}px`;
+}
+
+async function handleContextMenuDelete(): Promise<void> {
+  const target = contextMenuTarget;
+  hideContextMenu();
+  if (!target) return;
+
+  const { pane, entry } = target;
+  const confirmed = window.confirm(
+    t("preview.deleteConfirm", { name: entry.name })
+  );
+  if (!confirmed) {
+    return;
+  }
+
+  try {
+    await deleteEntry(entry.path);
+
+    if (pane === "machine") {
+      clearMachineSelectionAfterDelete();
+      setStatus(t("preview.deleted", { name: entry.name }), 4000);
+      await refreshMachineDirectory();
+    } else {
+      clearPaneSelection("local");
+      setStatus(t("preview.deleted", { name: entry.name }), 4000);
+      await refreshLocalDirectory();
+    }
+  } catch (error) {
+    setStatus(t("preview.deleteError", { error: String(error) }));
+  }
+}
+
+async function handleContextMenuEdit(): Promise<void> {
+  const target = contextMenuTarget;
+  hideContextMenu();
+  if (!target || !canEditViaContextMenu(target.pane, target.entry)) {
+    return;
+  }
+
+  await openLocalEntryExternally(target.entry);
+}
+
+function bindAppContextMenu(): void {
+  const handleRelevantContextMenu = (event: MouseEvent) => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+    if (target.closest("input, textarea, select, [contenteditable='true']")) {
+      return;
+    }
+
+    event.preventDefault();
+
+    const row = target.closest("#machine-file-list li, #local-file-list li");
+    if (!(row instanceof HTMLLIElement)) {
+      hideContextMenu();
+      return;
+    }
+
+    const pane = row.dataset.pane as PaneKind | undefined;
+    const path = row.dataset.path;
+    if (!pane || !path) {
+      hideContextMenu();
+      return;
+    }
+
+    const entry = getEntries(pane).find((candidate) => candidate.path === path);
+    if (!entry) {
+      hideContextMenu();
+      return;
+    }
+
+    selectEntry(pane, entry, row);
+    showContextMenu(event.clientX, event.clientY, pane, entry);
+  };
+
+  appRootEl().addEventListener("contextmenu", handleRelevantContextMenu);
+  document.addEventListener("click", () => hideContextMenu());
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      hideContextMenu();
+    }
+  });
+  browserPanelEl().addEventListener("scroll", () => hideContextMenu(), true);
+  previewPanelEl().addEventListener("scroll", () => hideContextMenu(), true);
+  window.addEventListener("blur", () => hideContextMenu());
+
+  contextMenuDeleteButton().addEventListener("click", () => {
+    void handleContextMenuDelete();
+  });
+  contextMenuEditButton().addEventListener("click", () => {
+    void handleContextMenuEdit();
+  });
+}
+
+async function navigateLocalHistory(direction: -1 | 1): Promise<void> {
+  const nextIndex = localNavigationIndex + direction;
+  const target = localNavigationHistory[nextIndex];
+  if (!target) {
+    return;
+  }
+
+  localNavigationIndex = nextIndex;
+  await loadLocalDirectory(target.path, [...target.breadcrumb], {
+    recordHistory: false,
+  });
+}
+
+async function navigateLocalUp(): Promise<void> {
+  const root = state.get("local_root");
+  if (!root) {
+    return;
+  }
+
+  const breadcrumb = state.get("local_breadcrumb");
+  if (breadcrumb.length === 0) {
+    return;
+  }
+
+  const parentBreadcrumb = breadcrumb.slice(0, -1);
+  const parentPath =
+    parentBreadcrumb.length === 0 ? root : buildPath(root, parentBreadcrumb);
+
+  await loadLocalDirectory(parentPath, parentBreadcrumb);
+}
+
+async function openSelectedLocalEntry(): Promise<void> {
+  const entry = state.get("selected_local_entry");
+  if (!isLocalExternallyOpenable(entry)) {
+    return;
+  }
+
+  await openLocalEntryExternally(entry);
+}
+
 function selectEntryByPath(pane: PaneKind, path: string): void {
   const match = getEntries(pane).find((entry) => entry.path === path);
-  if (!match || match.is_dir) return;
+  if (!match) return;
 
   const list = pane === "machine" ? machineListEl() : localListEl();
   const row = list.querySelector(`[data-path="${CSS.escape(path)}"]`);
@@ -255,6 +541,8 @@ export async function loadMachineDirectory(
   path: string,
   breadcrumb: string[]
 ): Promise<BrowserEntry[]> {
+  hideContextMenu();
+
   state.patch({
     machine_current_path: path,
     machine_breadcrumb: breadcrumb,
@@ -292,8 +580,11 @@ export async function loadMachineDirectory(
 
 export async function loadLocalDirectory(
   path: string,
-  breadcrumb: string[]
+  breadcrumb: string[],
+  options?: { recordHistory?: boolean }
 ): Promise<BrowserEntry[]> {
+  hideContextMenu();
+
   state.patch({
     local_current_path: path,
     local_breadcrumb: breadcrumb,
@@ -316,6 +607,9 @@ export async function loadLocalDirectory(
       local_entries: entries,
       is_loading_local_directory: false,
     });
+    if (options?.recordHistory !== false) {
+      recordLocalNavigation(path, breadcrumb);
+    }
     renderEntries("local", entries);
     setStatus(t("status.localReady", { path }));
     return entries;
@@ -326,6 +620,7 @@ export async function loadLocalDirectory(
     return [];
   } finally {
     updateTransferButtons();
+    updateLocalNavigationButtons();
   }
 }
 
@@ -347,7 +642,9 @@ export async function refreshLocalDirectory(
   const currentPath = state.get("local_current_path");
   if (!currentPath) return;
 
-  await loadLocalDirectory(currentPath, [...state.get("local_breadcrumb")]);
+  await loadLocalDirectory(currentPath, [...state.get("local_breadcrumb")], {
+    recordHistory: false,
+  });
   if (selectedPath) {
     selectEntryByPath("local", selectedPath);
   }
@@ -364,6 +661,7 @@ async function chooseLocalRoot(): Promise<void> {
     return;
   }
 
+  resetLocalNavigationHistory();
   state.patch({
     local_root: result,
     local_current_path: null,
@@ -406,6 +704,11 @@ function updateTransferButtons(): void {
   const machineStatus = machine
     ? state.get("machine_statuses").get(machine.id) ?? "unknown"
     : "unknown";
+  const machineDeleteAllowed =
+    !!machine &&
+    !machine.protected &&
+    machineStatus === "online" &&
+    !!state.get("machine_current_path");
 
   copyToMachineButton().disabled =
     !machine ||
@@ -418,6 +721,15 @@ function updateTransferButtons(): void {
     machineStatus !== "online" ||
     !state.get("local_current_path") ||
     !state.get("selected_machine_entry");
+
+  openLocalEntryButton().disabled = !isLocalExternallyOpenable(
+    state.get("selected_local_entry")
+  );
+
+  deleteMachineEntryButton().disabled =
+    !machineDeleteAllowed || !state.get("selected_machine_entry");
+  deleteMachineFolderContentsButton().disabled =
+    !machineDeleteAllowed || state.get("machine_entries").length === 0;
 }
 
 async function runTransfer(
@@ -490,8 +802,11 @@ async function retryWithOverwrite(
     direction === "to_machine"
       ? `${machineName ?? t("pane.machine")} ${t("transfer.machineDest")}`
       : t("transfer.localDest");
+  const promptKey = result.is_directory
+    ? "transfer.overwriteFolderPrompt"
+    : "transfer.overwritePrompt";
   const confirmed = window.confirm(
-    t("transfer.overwritePrompt", {
+    t(promptKey, {
       message: result.message,
       name: fileName,
       dest,
@@ -533,6 +848,65 @@ async function applyTransferResult(
   }
 }
 
+async function deleteSelectedMachineEntry(): Promise<void> {
+  const machine = state.get("selected_machine");
+  const entry = state.get("selected_machine_entry");
+
+  if (!machine || machine.protected || !entry) {
+    return;
+  }
+
+  const confirmed = window.confirm(
+    t("preview.deleteConfirm", { name: entry.name })
+  );
+  if (!confirmed) {
+    return;
+  }
+
+  try {
+    await deleteEntry(entry.path);
+    clearMachineSelectionAfterDelete();
+    setStatus(t("preview.deleted", { name: entry.name }), 4000);
+    await refreshMachineDirectory();
+  } catch (error) {
+    setStatus(t("preview.deleteError", { error: String(error) }));
+  }
+}
+
+async function deleteAllMachineFolderContents(): Promise<void> {
+  const machine = state.get("selected_machine");
+  const currentPath = state.get("machine_current_path");
+  const entryCount = state.get("machine_entries").length;
+
+  if (!machine || machine.protected || !currentPath || entryCount === 0) {
+    return;
+  }
+
+  const confirmed = window.confirm(
+    t("machine.deleteAllConfirm", {
+      path: currentPath,
+      count: String(entryCount),
+    })
+  );
+  if (!confirmed) {
+    return;
+  }
+
+  try {
+    const deletedCount = await deleteDirectoryContents(currentPath);
+    clearMachineSelectionAfterDelete();
+    setStatus(
+      t("machine.deleteAllDone", {
+        count: String(deletedCount),
+      }),
+      5000
+    );
+    await refreshMachineDirectory();
+  } catch (error) {
+    setStatus(t("machine.deleteAllError", { error: String(error) }));
+  }
+}
+
 function fileIcon(extension: string): string {
   switch (extension) {
     case ".nc":
@@ -555,14 +929,34 @@ function formatSize(bytes: number): string {
 }
 
 export function initFileBrowser(): void {
+  bindAppContextMenu();
+
   chooseLocalFolderButton().addEventListener("click", () => {
     void chooseLocalRoot();
+  });
+  openLocalEntryButton().addEventListener("click", () => {
+    void openSelectedLocalEntry();
+  });
+  localBackButton().addEventListener("click", () => {
+    void navigateLocalHistory(-1);
+  });
+  localForwardButton().addEventListener("click", () => {
+    void navigateLocalHistory(1);
+  });
+  localUpButton().addEventListener("click", () => {
+    void navigateLocalUp();
   });
   copyToMachineButton().addEventListener("click", () => {
     void runTransfer("to_machine");
   });
   copyToLocalButton().addEventListener("click", () => {
     void runTransfer("to_local");
+  });
+  deleteMachineEntryButton().addEventListener("click", () => {
+    void deleteSelectedMachineEntry();
+  });
+  deleteMachineFolderContentsButton().addEventListener("click", () => {
+    void deleteAllMachineFolderContents();
   });
 
   state.subscribe("selected_machine", (machine) => {
@@ -611,10 +1005,17 @@ export function initFileBrowser(): void {
 
   state.subscribe("local_root", () => {
     updateLocalPaneStatus();
+    if (!state.get("local_root")) {
+      resetLocalNavigationHistory();
+    }
+    updateLocalNavigationButtons();
     updateTransferButtons();
   });
   state.subscribe("machine_current_path", () => updateTransferButtons());
-  state.subscribe("local_current_path", () => updateTransferButtons());
+  state.subscribe("local_current_path", () => {
+    updateTransferButtons();
+    updateLocalNavigationButtons();
+  });
   state.subscribe("selected_machine_entry", () => updateTransferButtons());
   state.subscribe("selected_local_entry", () => updateTransferButtons());
 
@@ -649,5 +1050,6 @@ export function initFileBrowser(): void {
 
   updateMachinePaneStatus();
   updateLocalPaneStatus();
+  updateLocalNavigationButtons();
   updateTransferButtons();
 }

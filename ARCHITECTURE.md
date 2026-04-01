@@ -22,8 +22,8 @@ This is **not** a generic file manager.
 | Shell / native | Tauri 2 (Rust + WebView2 on Windows) |
 | Backend logic | Rust (safe, testable, no GC pauses) |
 | Frontend | Plain TypeScript + Vite (no framework) |
-| Config | JSON (`machines.json` next to executable) |
-| Build | `npm run tauri build` for installer bundles, `npm run build:portable` for portable test package |
+| Config | JSON (`machines.json` in `%LOCALAPPDATA%\\HAAS CNC Connect` for installed builds; local file for portable/dev when present) |
+| Build | `npm run build:installer` for production NSIS installer, `npm run build:portable` for portable test package |
 
 ---
 
@@ -35,7 +35,7 @@ haas-connect-tauri/
 ├── vite.config.ts                Vite dev/build config
 ├── tsconfig.json
 ├── package.json
-├── machines.json                 Sample config (copied next to .exe on build)
+├── machines.json                 Sample config for portable/dev use
 │
 ├── src/                          TypeScript frontend
 │   ├── main.ts                   Boot: loads config, wires components
@@ -170,8 +170,9 @@ preview-pane.ts: loadPreview(entry)
 5. **No recursive tree scanning.**
    `browser.rs::list_directory` reads exactly one directory level.
 
-6. **Config is just JSON next to the executable.**
-   No registry, no AppData, no user profile dependencies. Portable.
+6. **Installed builds write config to Local AppData.**
+   Production installs use `%LOCALAPPDATA%\HAAS CNC Connect\machines.json`.
+   Portable/dev runs keep using a local `machines.json` when one is already present.
 
 7. **Machine settings stay operator-focused.**
    Settings edit only machine profiles; no generic admin surface or file-manager drift.
@@ -204,7 +205,8 @@ preview-pane.ts: loadPreview(entry)
 
 **Legacy migration:** If only `config.json` (old Python format) is found, it is
 automatically converted to the v2 format in memory. Save triggers a write of
-`machines.json`. The old file is not deleted.
+`machines.json`. Installed builds write that file to `%LOCALAPPDATA%\HAAS CNC Connect\`;
+portable/dev runs keep a local `machines.json` when one already exists. The old file is not deleted.
 
 ### Machine settings behavior
 
@@ -271,10 +273,10 @@ default on Windows 10/11 with updates).
 ## Building for production
 
 ```sh
-npm run tauri build
+npm run build:installer
 ```
 
-Produces NSIS installer and MSI in `src-tauri/target/release/bundle/`.
+Produces the NSIS installer in `src-tauri/target/release/bundle/nsis/`.
 
 ## Building a portable Windows test package
 

@@ -3,7 +3,7 @@
 
 import type { ActivePaneSelection, BrowserEntry, PreviewData } from "../types/index";
 import { state } from "../state";
-import { getPreview, deleteFile, openExternal } from "../api";
+import { getPreview, deleteEntry, openExternal } from "../api";
 import { t } from "../translations";
 import { refreshMachineDirectory } from "./file-browser";
 import { setStatus } from "./status-bar";
@@ -12,9 +12,18 @@ const pholderEl = () => document.getElementById("preview-placeholder")!;
 const dataEl = () => document.getElementById("preview-data")!;
 const titleEl = () => document.getElementById("preview-title")!;
 const metaEl = () => document.getElementById("preview-metadata")!;
+const paneStatusEl = () =>
+  document.getElementById("preview-pane-status") as HTMLSpanElement;
+const breadcrumbEl = () =>
+  document.getElementById("preview-breadcrumb") as HTMLDivElement;
 const textEl = () =>
   document.getElementById("preview-text-content") as HTMLPreElement;
 const actionsEl = () => document.getElementById("preview-actions")!;
+const LOCAL_GCODE_EXTENSIONS = new Set([".nc", ".tap", ".cnc"]);
+const LOCAL_EDITABLE_EXTENSIONS = new Set([
+  ...LOCAL_GCODE_EXTENSIONS,
+  ".txt",
+]);
 
 function showPlaceholder(msg: string): void {
   pholderEl().textContent = msg;
@@ -27,11 +36,35 @@ function showData(): void {
   dataEl().hidden = false;
 }
 
+function updatePreviewHeader(selection: ActivePaneSelection | null): void {
+  if (!selection) {
+    const idleText = t("preview.selectFile");
+    paneStatusEl().textContent = idleText;
+    breadcrumbEl().textContent = idleText;
+    return;
+  }
+
+  paneStatusEl().textContent = selection.entry.name;
+  breadcrumbEl().textContent = selection.entry.path;
+}
+
 /** Load and render preview for the selected entry. */
 async function loadPreview(selection: ActivePaneSelection): Promise<void> {
   const { entry } = selection;
   const config = state.get("config");
   if (!config) return;
+  updatePreviewHeader(selection);
+
+  if (entry.is_dir) {
+    state.set("preview", null);
+    titleEl().textContent = entry.name;
+    metaEl().textContent = t("preview.folderSelected");
+    textEl().textContent = "";
+    textEl().hidden = true;
+    renderActions(selection, null);
+    showData();
+    return;
+  }
 
   if (!entry.previewable && !entry.is_dir) {
     showPlaceholder(
@@ -41,6 +74,7 @@ async function loadPreview(selection: ActivePaneSelection): Promise<void> {
     showData();
     titleEl().textContent = entry.name;
     metaEl().textContent = entry.size !== null ? formatSize(entry.size) : "";
+    textEl().textContent = "";
     textEl().hidden = true;
     return;
   }
@@ -114,20 +148,19 @@ function renderActions(
   const el = actionsEl();
   el.innerHTML = "";
 
-  if (entry.is_dir) return;
-
-  // Open externally.
-  const openBtn = document.createElement("button");
-  openBtn.className = "btn-action";
-  openBtn.textContent = t("btn.openExternal");
-  openBtn.addEventListener("click", async () => {
-    try {
-      await openExternal(entry.path);
-    } catch (err) {
-      setStatus(t("preview.openError", { error: String(err) }));
-    }
-  });
-  el.appendChild(openBtn);
+  if (shouldShowPreviewOpenAction(selection)) {
+    const openBtn = document.createElement("button");
+    openBtn.className = "btn-action";
+    openBtn.textContent = getOpenActionLabel(selection);
+    openBtn.addEventListener("click", async () => {
+      try {
+        await openExternal(entry.path);
+      } catch (err) {
+        setStatus(t("preview.openError", { error: String(err) }));
+      }
+    });
+    el.appendChild(openBtn);
+  }
 
   // Delete (only if machine is not protected).
   const machine = state.get("selected_machine");
@@ -147,7 +180,7 @@ async function promptDelete(entry: BrowserEntry): Promise<void> {
   if (!confirmed) return;
 
   try {
-    await deleteFile(entry.path);
+    await deleteEntry(entry.path);
     setStatus(t("preview.deleted", { name: entry.name }));
     // Refresh directory.
     await refreshMachineDirectory();
@@ -162,6 +195,38 @@ async function promptDelete(entry: BrowserEntry): Promise<void> {
   }
 }
 
+function shouldShowPreviewOpenAction(selection: ActivePaneSelection): boolean {
+  const { pane, entry } = selection;
+
+  if (entry.is_dir) {
+    return false;
+  }
+
+  if (entry.extension === ".pdf") {
+    return true;
+  }
+
+  return pane === "local" && LOCAL_EDITABLE_EXTENSIONS.has(entry.extension);
+}
+
+function getOpenActionLabel(selection: ActivePaneSelection): string {
+  const { pane, entry } = selection;
+
+  if (entry.extension === ".pdf") {
+    return t("btn.openPdfViewer");
+  }
+
+  if (pane === "local" && LOCAL_GCODE_EXTENSIONS.has(entry.extension)) {
+    return t("btn.openInGcodeViewer");
+  }
+
+  if (pane === "local" && LOCAL_EDITABLE_EXTENSIONS.has(entry.extension)) {
+    return t("btn.openExternal");
+  }
+
+  return t("btn.openExternal");
+}
+
 function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -172,6 +237,7 @@ function formatSize(bytes: number): string {
 export function initPreviewPane(): void {
   state.subscribe("active_selection", (selection) => {
     if (!selection) {
+      updatePreviewHeader(null);
       showPlaceholder(t("preview.selectFile"));
       state.set("preview", null);
       return;
@@ -181,8 +247,13 @@ export function initPreviewPane(): void {
 
   // Update placeholder text on language change if nothing is selected.
   state.subscribe("language", () => {
-    if (!state.get("active_selection")) {
+    const selection = state.get("active_selection");
+    if (!selection) {
+      updatePreviewHeader(null);
       showPlaceholder(t("preview.selectFile"));
+      return;
     }
+
+    updatePreviewHeader(selection);
   });
 }

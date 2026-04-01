@@ -70,9 +70,14 @@ export async function getPreview(
   return invoke<PreviewData>("cmd_get_preview", { path, maxBytes });
 }
 
-/** Delete a single file. Confirmation must happen in the UI before calling this. */
-export async function deleteFile(path: string): Promise<void> {
-  return invoke<void>("cmd_delete_file", { path });
+/** Delete a single file or directory entry. Confirmation must happen in the UI first. */
+export async function deleteEntry(path: string): Promise<void> {
+  return invoke<void>("cmd_delete_entry", { path });
+}
+
+/** Delete all contents of a directory without deleting the directory itself. */
+export async function deleteDirectoryContents(path: string): Promise<number> {
+  return invoke<number>("cmd_delete_directory_contents", { path });
 }
 
 /** Open a file or directory in the OS default application. */

@@ -123,6 +123,7 @@ pub struct TransferFileResult {
     pub destination_dir: String,
     pub destination_path: Option<String>,
     pub file_name: String,
+    pub is_directory: bool,
     pub message: String,
 }
 
@@ -138,13 +139,13 @@ pub struct AppConfig {
     /// Default local folder auto-loaded on startup. None = not configured.
     #[serde(default)]
     pub default_local_path: Option<String>,
-    /// UI language: "en" (English) or "hr" (Croatian). Defaults to "en".
+    /// UI language: "en" (English) or "hr" (Croatian). Defaults to "hr".
     #[serde(default = "default_language")]
     pub language: String,
 }
 
 fn default_language() -> String {
-    "en".to_string()
+    "hr".to_string()
 }
 
 impl Default for AppConfig {
@@ -155,7 +156,7 @@ impl Default for AppConfig {
             check_timeout_secs: 3,
             preview_max_bytes: 51_200,
             default_local_path: None,
-            language: "en".to_string(),
+            language: "hr".to_string(),
         }
     }
 }

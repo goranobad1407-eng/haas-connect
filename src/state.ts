@@ -27,8 +27,8 @@ class Store {
     is_loading_local_directory: false,
     is_checking: false,
     is_loading_preview: false,
-    status_message: "Ready",
-    language: "en" as Language,
+    status_message: "Spreman",
+    language: "hr" as Language,
   };
 
   // Map from state key → list of listeners.

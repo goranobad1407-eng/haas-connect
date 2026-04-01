@@ -55,7 +55,7 @@ export function applyConfigState(config: AppConfig, warnings: string[]): void {
   });
 
   // Apply language from config (only triggers subscribers when it actually changes).
-  const newLang = ((config.language || "en") as Language);
+  const newLang = ((config.language || "hr") as Language);
   if (newLang !== state.get("language")) {
     state.set("language", newLang);
   }

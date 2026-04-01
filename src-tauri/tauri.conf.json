@@ -2,7 +2,7 @@
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "HAAS CNC Connect",
   "version": "0.1.0",
-  "identifier": "com.haascncconnect.app",
+  "identifier": "com.haascncconnect",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
@@ -13,10 +13,10 @@
     "windows": [
       {
         "title": "HAAS CNC Connect",
-        "width": 1100,
-        "height": 700,
-        "minWidth": 800,
-        "minHeight": 500,
+        "width": 1280,
+        "height": 760,
+        "minWidth": 1260,
+        "minHeight": 700,
         "resizable": true,
         "fullscreen": false,
         "decorations": true,
@@ -29,7 +29,7 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": "nsis",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -37,7 +37,10 @@
       "icons/icon.ico"
     ],
     "windows": {
-      "wix": {},
+      "webviewInstallMode": {
+        "type": "offlineInstaller",
+        "silent": true
+      },
       "nsis": {}
     }
   }

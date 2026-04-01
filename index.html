@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="hr">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -11,21 +11,24 @@
       <!-- Header -->
       <header id="header">
         <span class="app-title">HAAS CNC Connect</span>
-        <span id="status-indicator" class="status-idle">Ready</span>
+        <span id="status-indicator" class="status-idle" data-i18n="status.ready">Spreman</span>
       </header>
 
       <!-- Main layout: three panels -->
       <main id="main-layout">
         <!-- Left: machine list -->
         <aside id="machine-panel">
-          <div class="panel-header" data-i18n="panel.machines">Machines</div>
+          <div class="sidebar-brand" aria-label="Metalobad">
+            <img class="sidebar-logo" src="/logo_metalobad.png" alt="Metalobad" />
+          </div>
+          <div class="panel-header" data-i18n="panel.machines">Strojevi</div>
           <div id="machine-list"></div>
           <div class="panel-footer">
             <button id="btn-settings" class="btn-ghost" title="Open machine settings" data-i18n="btn.machineSettings">
-              Machine Settings
+              Postavke stroja
             </button>
             <button id="btn-app-settings" class="btn-ghost btn-app-settings-footer" title="Open app settings" data-i18n="btn.appSettings">
-              App Settings
+              Postavke aplikacije
             </button>
           </div>
         </aside>
@@ -36,19 +39,25 @@
             <section class="transfer-pane">
               <div class="pane-toolbar">
                 <div class="pane-heading">
-                  <span class="pane-title" data-i18n="pane.machine">Machine</span>
-                  <span id="machine-pane-status" class="pane-subtitle">Select a machine</span>
+                  <span class="pane-title" data-i18n="pane.machine">Stroj</span>
+                  <span id="machine-pane-status" class="pane-subtitle">Odaberite stroj</span>
                 </div>
                 <div class="pane-actions">
+                  <button id="btn-delete-machine-entry" class="btn-ghost btn-inline btn-danger" type="button" disabled data-i18n="btn.delete">
+                    Obriši
+                  </button>
+                  <button id="btn-delete-machine-folder-contents" class="btn-ghost btn-inline btn-danger" type="button" disabled data-i18n="btn.deleteAll">
+                    Obriši sve
+                  </button>
                   <button id="btn-copy-to-local" class="btn-ghost btn-inline" type="button" disabled data-i18n="btn.copyToLocal">
-                    Copy to local
+                    Kopiraj lokalno
                   </button>
                 </div>
               </div>
-              <div id="machine-breadcrumb" class="pane-breadcrumb">Select a machine from the left panel</div>
+              <div id="machine-breadcrumb" class="pane-breadcrumb">Odaberite stroj s lijeve ploče</div>
               <div class="pane-list-container">
                 <div id="machine-file-list-placeholder" class="placeholder-text">
-                  Select a machine from the left panel
+                  Odaberite stroj s lijeve ploče
                 </div>
                 <ul id="machine-file-list" hidden></ul>
               </div>
@@ -57,22 +66,59 @@
             <section class="transfer-pane">
               <div class="pane-toolbar">
                 <div class="pane-heading">
-                  <span class="pane-title" data-i18n="pane.local">Local</span>
-                  <span id="local-pane-status" class="pane-subtitle">Choose a local work folder</span>
+                  <span class="pane-title" data-i18n="pane.local">Lokalno</span>
+                  <span id="local-pane-status" class="pane-subtitle">Odaberite lokalnu radnu mapu</span>
                 </div>
                 <div class="pane-actions">
                   <button id="btn-choose-local-folder" class="btn-ghost btn-inline" type="button" data-i18n="btn.chooseFolder">
-                    Choose Folder
+                    Odaberi mapu
+                  </button>
+                  <button id="btn-open-local-entry" class="btn-ghost btn-inline" type="button" disabled data-i18n="btn.open">
+                    Otvori
                   </button>
                   <button id="btn-copy-to-machine" class="btn-primary btn-inline" type="button" disabled data-i18n="btn.copyToMachine">
-                    Copy to machine
+                    Kopiraj na stroj
                   </button>
                 </div>
               </div>
-              <div id="local-breadcrumb" class="pane-breadcrumb">Choose a local work folder</div>
+              <div class="pane-breadcrumb pane-breadcrumb-with-nav">
+                <div class="pane-nav-controls">
+                  <button
+                    id="btn-local-back"
+                    class="btn-ghost btn-inline btn-nav"
+                    type="button"
+                    disabled
+                    data-i18n-title="btn.back"
+                    data-i18n-aria-label="btn.back"
+                  >
+                    ←
+                  </button>
+                  <button
+                    id="btn-local-forward"
+                    class="btn-ghost btn-inline btn-nav"
+                    type="button"
+                    disabled
+                    data-i18n-title="btn.forward"
+                    data-i18n-aria-label="btn.forward"
+                  >
+                    →
+                  </button>
+                  <button
+                    id="btn-local-up"
+                    class="btn-ghost btn-inline btn-nav"
+                    type="button"
+                    disabled
+                    data-i18n-title="btn.up"
+                    data-i18n-aria-label="btn.up"
+                  >
+                    ↑
+                  </button>
+                </div>
+                <div id="local-breadcrumb" class="pane-breadcrumb-text">Odaberite lokalnu radnu mapu</div>
+              </div>
               <div class="pane-list-container">
                 <div id="local-file-list-placeholder" class="placeholder-text">
-                  Choose a local work folder to browse CNC files.
+                  Odaberite lokalnu radnu mapu za pregled CNC datoteka.
                 </div>
                 <ul id="local-file-list" hidden></ul>
               </div>
@@ -82,10 +128,19 @@
 
         <!-- Right: preview pane -->
         <aside id="preview-panel">
-          <div class="panel-header" data-i18n="panel.preview">Preview</div>
+          <div class="pane-toolbar preview-toolbar">
+            <div class="pane-heading">
+              <span class="pane-title" data-i18n="panel.preview">Pregled</span>
+              <span id="preview-pane-status" class="pane-subtitle" data-i18n="preview.selectFile">Odaberite datoteku za pregled</span>
+            </div>
+            <div class="pane-actions pane-actions-empty" aria-hidden="true"></div>
+          </div>
+          <div id="preview-breadcrumb" class="pane-breadcrumb preview-breadcrumb" data-i18n="preview.selectFile">
+            Odaberite datoteku za pregled
+          </div>
           <div id="preview-content">
             <div id="preview-placeholder" class="placeholder-text">
-              Select a file to preview
+              Odaberite datoteku za pregled
             </div>
             <div id="preview-data" hidden>
               <div id="preview-title"></div>
@@ -99,8 +154,18 @@
 
       <!-- Status bar -->
       <footer id="status-bar">
-        <span id="status-message">Ready</span>
+        <span id="status-message">Spreman</span>
+        <span id="status-footer-text">Copyright 2006 Goran Obad</span>
       </footer>
+    </div>
+
+    <div id="file-context-menu" class="context-menu" hidden>
+      <button id="context-menu-delete" class="context-menu-item context-menu-danger" type="button" data-i18n="btn.delete">
+        Obriši
+      </button>
+      <button id="context-menu-edit" class="context-menu-item" type="button" data-i18n="btn.edit">
+        Uredi
+      </button>
     </div>
 
     <!-- Machine Settings modal -->

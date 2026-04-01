@@ -32,6 +32,12 @@ function buildMachineItem(machine: MachineProfile): HTMLElement {
   const status = state.get("machine_statuses").get(machine.id) ?? "unknown";
   item.classList.add(`status-${status}`);
 
+  const info = document.createElement("div");
+  info.className = "machine-info";
+
+  const headerRow = document.createElement("div");
+  headerRow.className = "machine-header-row";
+
   const dot = document.createElement("span");
   dot.className = `status-dot dot-${status}`;
   dot.title = machineStatusLabel(status);
@@ -40,21 +46,24 @@ function buildMachineItem(machine: MachineProfile): HTMLElement {
   nameEl.className = "machine-name";
   nameEl.textContent = machine.name;
 
+  const badgeEl = document.createElement("span");
+  badgeEl.className = `machine-status-badge badge-${status}`;
+  badgeEl.textContent = machineStatusBadge(status);
+
+  const statusTextEl = document.createElement("span");
+  statusTextEl.className = `machine-status-text status-text-${status}`;
+  statusTextEl.textContent = machineStatusLabel(status);
+
   const pathEl = document.createElement("span");
   pathEl.className = "machine-path";
   pathEl.textContent = machine.path;
 
-  const statusTextEl = document.createElement("span");
-  statusTextEl.className = `machine-status-text status-text-${status}`;
-  statusTextEl.textContent = status !== "unknown" ? machineStatusLabel(status) : "";
+  const statusRow = document.createElement("div");
+  statusRow.className = "machine-status-row";
+  statusRow.append(dot, statusTextEl);
 
-  const info = document.createElement("div");
-  info.className = "machine-info";
-  info.appendChild(nameEl);
-  info.appendChild(pathEl);
-  info.appendChild(statusTextEl);
-
-  item.appendChild(dot);
+  headerRow.append(nameEl, badgeEl);
+  info.append(headerRow, statusRow, pathEl);
   item.appendChild(info);
 
   // Click: select this machine.
@@ -81,10 +90,16 @@ function updateMachineStatus(id: string, status: AvailabilityStatus): void {
   dot.className = `status-dot dot-${status}`;
   dot.title = machineStatusLabel(status);
 
+  const badge = item.querySelector(".machine-status-badge") as HTMLElement | null;
+  if (badge) {
+    badge.className = `machine-status-badge badge-${status}`;
+    badge.textContent = machineStatusBadge(status);
+  }
+
   const statusText = item.querySelector(".machine-status-text") as HTMLElement | null;
   if (statusText) {
     statusText.className = `machine-status-text status-text-${status}`;
-    statusText.textContent = status !== "unknown" ? machineStatusLabel(status) : "";
+    statusText.textContent = machineStatusLabel(status);
   }
 
   item.className = `machine-item status-${status}`;
@@ -156,6 +171,17 @@ function machineStatusLabel(s: AvailabilityStatus): string {
     case "offline":  return t("machine.offline");
     case "timeout":  return t("machine.timeout");
     case "error":    return t("machine.error");
+  }
+}
+
+function machineStatusBadge(s: AvailabilityStatus): string {
+  switch (s) {
+    case "unknown":  return t("machine.badgeUnknown");
+    case "checking": return t("machine.badgeChecking");
+    case "online":   return t("machine.badgeOnline");
+    case "offline":  return t("machine.badgeOffline");
+    case "timeout":  return t("machine.badgeTimeout");
+    case "error":    return t("machine.badgeError");
   }
 }
 

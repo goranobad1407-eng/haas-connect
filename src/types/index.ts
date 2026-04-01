@@ -86,6 +86,7 @@ export interface TransferFileResult {
   destination_dir: string;
   destination_path: string | null;
   file_name: string;
+  is_directory: boolean;
   message: string;
 }
 

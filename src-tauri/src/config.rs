@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
@@ -7,6 +8,7 @@ use crate::models::{AppConfig, LocationType, MachineProfile, MachineProfilesVali
 
 const CONFIG_FILENAME: &str = "machines.json";
 const LEGACY_FILENAME: &str = "config.json";
+const APP_CONFIG_DIRNAME: &str = "HAAS CNC Connect";
 
 /// Legacy format written by the Python/PySide6 app.
 #[derive(Deserialize)]
@@ -16,37 +18,26 @@ struct LegacyConfig {
 }
 
 /// Search order for the config file:
-/// 1. machines.json next to the executable
-/// 2. config.json next to the executable (legacy)
-/// 3. machines.json in the current working directory
-/// 4. config.json in the current working directory (legacy)
+/// 1. machines.json next to the executable or in the current working directory,
+///    but only outside Program Files (portable/dev override)
+/// 2. config.json in those same local locations (legacy)
+/// 3. machines.json in the user's Local AppData folder
+/// 4. config.json in the user's Local AppData folder (legacy)
 pub fn find_config_path() -> Option<PathBuf> {
-    let candidates: Vec<PathBuf> = {
-        let mut v = Vec::new();
-        if let Ok(exe_path) = std::env::current_exe() {
-            if let Some(exe_dir) = exe_path.parent() {
-                v.push(exe_dir.join(CONFIG_FILENAME));
-                v.push(exe_dir.join(LEGACY_FILENAME));
-            }
-        }
-        if let Ok(cwd) = std::env::current_dir() {
-            v.push(cwd.join(CONFIG_FILENAME));
-            v.push(cwd.join(LEGACY_FILENAME));
-        }
-        v
-    };
-
-    candidates.into_iter().find(|p| p.exists())
+    config_search_candidates().into_iter().find(|p| p.exists())
 }
 
-/// Default write path: machines.json next to executable, or CWD fallback.
+/// Default write path:
+/// - portable/dev: keep writing to a local machines.json if one already exists
+/// - installed app: write to Local AppData so Program Files stays read-only
 pub fn default_config_write_path() -> PathBuf {
-    if let Ok(exe_path) = std::env::current_exe() {
-        if let Some(exe_dir) = exe_path.parent() {
-            return exe_dir.join(CONFIG_FILENAME);
+    if let Some(existing) = find_config_path() {
+        if is_local_v2_config_path(&existing) {
+            return existing;
         }
     }
-    PathBuf::from(CONFIG_FILENAME)
+
+    local_app_config_path().unwrap_or_else(|| PathBuf::from(CONFIG_FILENAME))
 }
 
 /// Load config from disk. Returns default config (empty machine list) on any
@@ -85,9 +76,101 @@ pub fn load_machine_profiles() -> Vec<MachineProfile> {
 }
 
 pub fn save_config(config: &AppConfig, path: &Path) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("Failed to create config directory '{}': {e}", parent.display()))?;
+    }
     let json =
         serde_json::to_string_pretty(config).map_err(|e| format!("Serialisation error: {e}"))?;
     std::fs::write(path, json).map_err(|e| format!("Write error: {e}"))
+}
+
+fn config_search_candidates() -> Vec<PathBuf> {
+    let mut candidates = local_config_candidates();
+
+    if let Some(app_dir) = local_app_config_dir() {
+        candidates.push(app_dir.join(CONFIG_FILENAME));
+        candidates.push(app_dir.join(LEGACY_FILENAME));
+    }
+
+    candidates
+}
+
+fn local_config_candidates() -> Vec<PathBuf> {
+    let mut candidates = Vec::new();
+
+    if let Ok(exe_path) = std::env::current_exe() {
+        if let Some(exe_dir) = exe_path.parent() {
+            push_local_candidates(&mut candidates, exe_dir);
+        }
+    }
+
+    if let Ok(cwd) = std::env::current_dir() {
+        push_local_candidates(&mut candidates, &cwd);
+    }
+
+    candidates
+}
+
+fn push_local_candidates(candidates: &mut Vec<PathBuf>, dir: &Path) {
+    if is_under_program_files(dir) {
+        return;
+    }
+
+    let machine_path = dir.join(CONFIG_FILENAME);
+    let legacy_path = dir.join(LEGACY_FILENAME);
+
+    if !candidates.iter().any(|candidate| candidate == &machine_path) {
+        candidates.push(machine_path);
+    }
+    if !candidates.iter().any(|candidate| candidate == &legacy_path) {
+        candidates.push(legacy_path);
+    }
+}
+
+fn local_app_config_dir() -> Option<PathBuf> {
+    dirs::data_local_dir().map(|dir| dir.join(APP_CONFIG_DIRNAME))
+}
+
+fn local_app_config_path() -> Option<PathBuf> {
+    local_app_config_dir().map(|dir| dir.join(CONFIG_FILENAME))
+}
+
+fn is_local_v2_config_path(path: &Path) -> bool {
+    local_config_candidates()
+        .into_iter()
+        .any(|candidate| candidate == path && candidate.file_name() == Some(OsStr::new(CONFIG_FILENAME)))
+}
+
+fn is_under_program_files(path: &Path) -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        let roots = [
+            std::env::var_os("ProgramFiles"),
+            std::env::var_os("ProgramFiles(x86)"),
+            std::env::var_os("ProgramW6432"),
+        ];
+
+        return roots
+            .into_iter()
+            .flatten()
+            .map(PathBuf::from)
+            .any(|root| path_starts_with_case_insensitive(path, &root));
+    }
+
+    #[allow(unreachable_code)]
+    false
+}
+
+fn path_starts_with_case_insensitive(path: &Path, root: &Path) -> bool {
+    let path = path.to_string_lossy().replace('/', "\\").to_ascii_lowercase();
+    let root = root
+        .to_string_lossy()
+        .replace('/', "\\")
+        .trim_end_matches('\\')
+        .to_ascii_lowercase();
+
+    path == root || path.starts_with(&format!("{root}\\"))
 }
 
 pub fn validate_machine_profiles(profiles: &[MachineProfile]) -> MachineProfilesValidation {
@@ -270,7 +353,7 @@ fn migrate_legacy(legacy: LegacyConfig) -> AppConfig {
         check_timeout_secs: 3,
         preview_max_bytes: 51_200,
         default_local_path: None,
-        language: "en".to_string(),
+        language: "hr".to_string(),
     }
 }
 
@@ -355,6 +438,7 @@ mod tests {
         let config = migrate_legacy(legacy);
         assert_eq!(config.version, "2.0");
         assert!(config.machines.is_empty());
+        assert_eq!(config.language, "hr");
     }
 
     #[test]
@@ -386,6 +470,7 @@ mod tests {
     #[test]
     fn validate_catches_empty_machine_list() {
         let config = AppConfig::default();
+        assert_eq!(config.language, "hr");
         let warnings = validate_config(&config);
         assert!(!warnings.is_empty());
     }
@@ -542,7 +627,7 @@ mod tests {
             check_timeout_secs: 3,
             preview_max_bytes: 51_200,
             default_local_path: None,
-            language: "en".to_string(),
+            language: "hr".to_string(),
         };
 
         save_config(&config, &path).unwrap();
@@ -596,5 +681,24 @@ mod tests {
         assert_eq!(loaded.machines[0].id, "haas-1");
 
         let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn save_config_creates_missing_parent_directory() {
+        let root = std::env::temp_dir().join(format!(
+            "haas-connect-config-dir-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let nested = root.join("nested").join(CONFIG_FILENAME);
+
+        save_config(&AppConfig::default(), &nested).unwrap();
+
+        assert!(nested.exists());
+
+        let _ = std::fs::remove_file(&nested);
+        let _ = std::fs::remove_dir_all(root);
     }
 }

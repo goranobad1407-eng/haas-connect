@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
+    "build:installer": "powershell -ExecutionPolicy Bypass -File .\\scripts\\build-installer.ps1",
     "build:portable": "powershell -ExecutionPolicy Bypass -File .\\scripts\\build-portable.ps1",
     "preview": "vite preview",
     "tauri": "tauri"

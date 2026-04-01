@@ -23,7 +23,8 @@ pub async fn transfer_file(
             destination_dir,
             None,
             String::new(),
-            "Choose a source file first.".into(),
+            false,
+            "Choose a source file or folder first.".into(),
         );
     }
 
@@ -36,7 +37,8 @@ pub async fn transfer_file(
                 destination_dir,
                 None,
                 String::new(),
-                "Source path does not point to a file.".into(),
+                false,
+                "Source path does not point to a file or folder.".into(),
             )
         }
     };
@@ -48,53 +50,34 @@ pub async fn transfer_file(
             destination_dir,
             None,
             file_name,
-            "Selected source file does not exist.".into(),
+            false,
+            "Selected source path does not exist.".into(),
         );
     }
 
-    if source.is_dir() {
+    let source_is_directory = source.is_dir();
+    if !source_is_directory && !source.is_file() {
         return result(
             TransferFileStatus::InvalidSource,
             source_path,
             destination_dir,
             None,
             file_name,
-            "Source must be a file, not a folder.".into(),
+            false,
+            "Source must be a regular file or folder.".into(),
         );
     }
 
-    let extension = source
-        .extension()
-        .map(|value| format!(".{}", value.to_string_lossy().to_lowercase()))
-        .unwrap_or_default();
-
-    if let Some(allowed_extensions) = allowed_extensions {
-        if allowed_extensions.is_empty() {
+    if let Some(allowed_extensions) = allowed_extensions.as_ref() {
+        if let Err(message) = validate_allowed_extensions(&source, allowed_extensions) {
             return result(
                 TransferFileStatus::InvalidExtension,
                 source_path,
                 destination_dir,
                 None,
                 file_name,
-                "The destination profile has no allowed extensions configured.".into(),
-            );
-        }
-
-        if !allowed_extensions.iter().any(|item| item == &extension) {
-            return result(
-                TransferFileStatus::InvalidExtension,
-                source_path,
-                destination_dir,
-                None,
-                file_name,
-                format!(
-                    "Extension '{}' is not allowed for the destination machine.",
-                    if extension.is_empty() {
-                        "(none)"
-                    } else {
-                        &extension
-                    }
-                ),
+                source_is_directory,
+                message,
             );
         }
     }
@@ -107,6 +90,7 @@ pub async fn transfer_file(
             destination_dir,
             None,
             file_name,
+            source_is_directory,
             destination_offline_message(availability),
         );
     }
@@ -118,6 +102,7 @@ pub async fn transfer_file(
             destination_dir,
             None,
             file_name,
+            source_is_directory,
             "Destination folder does not exist.".into(),
         );
     }
@@ -129,6 +114,7 @@ pub async fn transfer_file(
             destination_dir,
             None,
             file_name,
+            source_is_directory,
             "Destination must be a folder.".into(),
         );
     }
@@ -142,6 +128,7 @@ pub async fn transfer_file(
                     destination_dir,
                     None,
                     file_name,
+                    source_is_directory,
                     "Destination must stay inside the selected machine location.".into(),
                 )
             }
@@ -152,6 +139,7 @@ pub async fn transfer_file(
                     destination_dir,
                     None,
                     file_name,
+                    source_is_directory,
                     message,
                 )
             }
@@ -160,47 +148,88 @@ pub async fn transfer_file(
     }
 
     let destination_path = destination.join(&file_name);
-    if destination_path.exists() && destination_path.is_dir() {
-        return result(
-            TransferFileStatus::InvalidDestination,
-            source_path,
-            destination_dir,
-            Some(destination_path.to_string_lossy().to_string()),
-            file_name,
-            "Destination contains a folder with the same name.".into(),
-        );
-    }
+    let destination_path_string = destination_path.to_string_lossy().to_string();
 
-    if destination_path.exists() && !overwrite {
-        return result(
-            TransferFileStatus::OverwriteRequired,
-            source_path,
-            destination_dir,
-            Some(destination_path.to_string_lossy().to_string()),
-            file_name.clone(),
-            format!("'{}' already exists in the destination folder.", file_name),
-        );
+    if source_is_directory {
+        if destination_path.exists() && !destination_path.is_dir() {
+            return result(
+                TransferFileStatus::InvalidDestination,
+                source_path,
+                destination_dir,
+                Some(destination_path_string),
+                file_name,
+                true,
+                "Destination contains a file with the same folder name.".into(),
+            );
+        }
+
+        if destination_path.exists() && !overwrite {
+            return result(
+                TransferFileStatus::OverwriteRequired,
+                source_path,
+                destination_dir,
+                Some(destination_path_string),
+                file_name,
+                true,
+                format!(
+                    "Folder '{}' already exists in the destination folder.",
+                    source.file_name().unwrap().to_string_lossy()
+                ),
+            );
+        }
+    } else {
+        if destination_path.exists() && destination_path.is_dir() {
+            return result(
+                TransferFileStatus::InvalidDestination,
+                source_path,
+                destination_dir,
+                Some(destination_path_string),
+                file_name,
+                false,
+                "Destination contains a folder with the same file name.".into(),
+            );
+        }
+
+        if destination_path.exists() && !overwrite {
+            return result(
+                TransferFileStatus::OverwriteRequired,
+                source_path,
+                destination_dir,
+                Some(destination_path_string),
+                file_name,
+                false,
+                format!(
+                    "'{}' already exists in the destination folder.",
+                    source.file_name().unwrap().to_string_lossy()
+                ),
+            );
+        }
     }
 
     let source_for_copy = source.clone();
     let destination_for_copy = destination_path.clone();
     let copy_result = tokio::task::spawn_blocking(move || {
-        if overwrite && destination_for_copy.exists() {
-            std::fs::remove_file(&destination_for_copy)?;
+        if source_for_copy.is_dir() {
+            copy_directory_tree(&source_for_copy, &destination_for_copy, overwrite)
+        } else {
+            copy_single_file(&source_for_copy, &destination_for_copy, overwrite)
         }
-
-        std::fs::copy(&source_for_copy, &destination_for_copy)
     })
     .await;
 
     match copy_result {
-        Ok(Ok(_)) => result(
+        Ok(Ok(())) => result(
             TransferFileStatus::Success,
             source_path,
             destination_dir,
             Some(destination_path.to_string_lossy().to_string()),
             file_name.clone(),
-            format!("Copied '{}' into the destination folder.", file_name),
+            source_is_directory,
+            if source_is_directory {
+                format!("Copied folder '{}' into the destination folder.", file_name)
+            } else {
+                format!("Copied '{}' into the destination folder.", file_name)
+            },
         ),
         Ok(Err(error)) => result(
             TransferFileStatus::CopyFailed,
@@ -208,6 +237,7 @@ pub async fn transfer_file(
             destination_dir,
             Some(destination_path.to_string_lossy().to_string()),
             file_name,
+            source_is_directory,
             format!("Copy failed: {error}"),
         ),
         Err(_) => result(
@@ -216,9 +246,132 @@ pub async fn transfer_file(
             destination_dir,
             Some(destination_path.to_string_lossy().to_string()),
             file_name,
+            source_is_directory,
             "Copy task failed unexpectedly.".into(),
         ),
     }
+}
+
+fn validate_allowed_extensions(source: &Path, allowed_extensions: &[String]) -> Result<(), String> {
+    if allowed_extensions.is_empty() {
+        return Err("The destination profile has no allowed extensions configured.".into());
+    }
+
+    if source.is_dir() {
+        validate_directory_extensions(source, allowed_extensions)
+    } else {
+        validate_file_extension(source, allowed_extensions)
+    }
+}
+
+fn validate_directory_extensions(
+    directory: &Path,
+    allowed_extensions: &[String],
+) -> Result<(), String> {
+    let read_dir = std::fs::read_dir(directory).map_err(|error| {
+        format!(
+            "Could not read source folder '{}': {error}",
+            directory.to_string_lossy()
+        )
+    })?;
+
+    for entry in read_dir {
+        let entry = entry.map_err(|error| {
+            format!(
+                "Could not read an entry inside '{}': {error}",
+                directory.to_string_lossy()
+            )
+        })?;
+        let path = entry.path();
+
+        if path.is_dir() {
+            validate_directory_extensions(&path, allowed_extensions)?;
+        } else if path.is_file() {
+            validate_file_extension(&path, allowed_extensions)?;
+        }
+    }
+
+    Ok(())
+}
+
+fn validate_file_extension(file: &Path, allowed_extensions: &[String]) -> Result<(), String> {
+    let extension = file
+        .extension()
+        .map(|value| format!(".{}", value.to_string_lossy().to_lowercase()))
+        .unwrap_or_default();
+
+    if allowed_extensions.iter().any(|item| item == &extension) {
+        return Ok(());
+    }
+
+    let display_extension = if extension.is_empty() {
+        "(none)".to_string()
+    } else {
+        extension
+    };
+
+    Err(format!(
+        "Extension '{}' is not allowed for '{}'.",
+        display_extension,
+        file.to_string_lossy()
+    ))
+}
+
+fn copy_directory_tree(source: &Path, destination: &Path, overwrite: bool) -> std::io::Result<()> {
+    if destination.exists() && !destination.is_dir() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::AlreadyExists,
+            format!(
+                "Destination '{}' is a file, not a folder.",
+                destination.to_string_lossy()
+            ),
+        ));
+    }
+
+    std::fs::create_dir_all(destination)?;
+
+    for entry in std::fs::read_dir(source)? {
+        let entry = entry?;
+        let source_path = entry.path();
+        let destination_path = destination.join(entry.file_name());
+
+        if source_path.is_dir() {
+            copy_directory_tree(&source_path, &destination_path, overwrite)?;
+        } else if source_path.is_file() {
+            copy_single_file(&source_path, &destination_path, overwrite)?;
+        }
+    }
+
+    Ok(())
+}
+
+fn copy_single_file(source: &Path, destination: &Path, overwrite: bool) -> std::io::Result<()> {
+    if let Some(parent) = destination.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    if destination.exists() {
+        if destination.is_dir() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::AlreadyExists,
+                format!(
+                    "Destination '{}' is a folder, not a file.",
+                    destination.to_string_lossy()
+                ),
+            ));
+        }
+
+        if overwrite {
+            std::fs::remove_file(destination)?;
+        } else {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::AlreadyExists,
+                format!("Destination file '{}' already exists.", destination.to_string_lossy()),
+            ));
+        }
+    }
+
+    std::fs::copy(source, destination).map(|_| ())
 }
 
 fn destination_offline_message(status: AvailabilityStatus) -> String {
@@ -254,6 +407,7 @@ fn result(
     destination_dir: String,
     destination_path: Option<String>,
     file_name: String,
+    is_directory: bool,
     message: String,
 ) -> TransferFileResult {
     TransferFileResult {
@@ -262,6 +416,7 @@ fn result(
         destination_dir,
         destination_path,
         file_name,
+        is_directory,
         message,
     }
 }
@@ -328,6 +483,7 @@ mod tests {
         .await;
 
         assert_eq!(result.status, TransferFileStatus::OverwriteRequired);
+        assert!(!result.is_directory);
         assert_eq!(std::fs::read_to_string(&destination).unwrap(), "old");
 
         let _ = std::fs::remove_dir_all(root);
@@ -458,6 +614,131 @@ mod tests {
         );
 
         let _ = std::fs::remove_dir_all(local_root);
+        let _ = std::fs::remove_dir_all(source_dir);
+    }
+
+    #[tokio::test]
+    async fn copies_directory_recursively_into_destination() {
+        let root = unique_temp_dir("dir-success-root");
+        let source_dir = unique_temp_dir("dir-success-source");
+        let source_folder = source_dir.join("job");
+        let nested = source_folder.join("sub");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::write(source_folder.join("program.nc"), "G0 X1").unwrap();
+        std::fs::write(nested.join("notes.txt"), "setup").unwrap();
+
+        let result = transfer_file(
+            source_folder.to_string_lossy().to_string(),
+            root.to_string_lossy().to_string(),
+            false,
+            1,
+            Some(vec![".nc".into(), ".txt".into()]),
+            Some(root.to_string_lossy().to_string()),
+        )
+        .await;
+
+        assert_eq!(result.status, TransferFileStatus::Success);
+        assert!(result.is_directory);
+        assert_eq!(
+            std::fs::read_to_string(root.join("job").join("program.nc")).unwrap(),
+            "G0 X1"
+        );
+        assert_eq!(
+            std::fs::read_to_string(root.join("job").join("sub").join("notes.txt")).unwrap(),
+            "setup"
+        );
+
+        let _ = std::fs::remove_dir_all(root);
+        let _ = std::fs::remove_dir_all(source_dir);
+    }
+
+    #[tokio::test]
+    async fn directory_requires_overwrite_when_destination_exists() {
+        let root = unique_temp_dir("dir-overwrite-root");
+        let source_dir = unique_temp_dir("dir-overwrite-source");
+        let source_folder = source_dir.join("job");
+        std::fs::create_dir_all(&source_folder).unwrap();
+        std::fs::write(source_folder.join("program.nc"), "new").unwrap();
+
+        let existing = root.join("job");
+        std::fs::create_dir_all(&existing).unwrap();
+        std::fs::write(existing.join("program.nc"), "old").unwrap();
+
+        let result = transfer_file(
+            source_folder.to_string_lossy().to_string(),
+            root.to_string_lossy().to_string(),
+            false,
+            1,
+            Some(vec![".nc".into()]),
+            Some(root.to_string_lossy().to_string()),
+        )
+        .await;
+
+        assert_eq!(result.status, TransferFileStatus::OverwriteRequired);
+        assert!(result.is_directory);
+        assert_eq!(std::fs::read_to_string(existing.join("program.nc")).unwrap(), "old");
+
+        let _ = std::fs::remove_dir_all(root);
+        let _ = std::fs::remove_dir_all(source_dir);
+    }
+
+    #[tokio::test]
+    async fn directory_merge_overwrites_conflicting_files_when_confirmed() {
+        let root = unique_temp_dir("dir-overwrite-confirm-root");
+        let source_dir = unique_temp_dir("dir-overwrite-confirm-source");
+        let source_folder = source_dir.join("job");
+        let source_nested = source_folder.join("sub");
+        std::fs::create_dir_all(&source_nested).unwrap();
+        std::fs::write(source_folder.join("program.nc"), "new").unwrap();
+        std::fs::write(source_nested.join("setup.txt"), "fresh").unwrap();
+
+        let existing = root.join("job");
+        let existing_nested = existing.join("sub");
+        std::fs::create_dir_all(&existing_nested).unwrap();
+        std::fs::write(existing.join("program.nc"), "old").unwrap();
+        std::fs::write(existing_nested.join("keep.txt"), "keep").unwrap();
+
+        let result = transfer_file(
+            source_folder.to_string_lossy().to_string(),
+            root.to_string_lossy().to_string(),
+            true,
+            1,
+            Some(vec![".nc".into(), ".txt".into()]),
+            Some(root.to_string_lossy().to_string()),
+        )
+        .await;
+
+        assert_eq!(result.status, TransferFileStatus::Success);
+        assert_eq!(std::fs::read_to_string(existing.join("program.nc")).unwrap(), "new");
+        assert_eq!(std::fs::read_to_string(existing_nested.join("setup.txt")).unwrap(), "fresh");
+        assert_eq!(std::fs::read_to_string(existing_nested.join("keep.txt")).unwrap(), "keep");
+
+        let _ = std::fs::remove_dir_all(root);
+        let _ = std::fs::remove_dir_all(source_dir);
+    }
+
+    #[tokio::test]
+    async fn rejects_directory_with_disallowed_nested_file() {
+        let root = unique_temp_dir("dir-ext-root");
+        let source_dir = unique_temp_dir("dir-ext-source");
+        let source_folder = source_dir.join("job");
+        std::fs::create_dir_all(&source_folder).unwrap();
+        std::fs::write(source_folder.join("program.exe"), "bad").unwrap();
+
+        let result = transfer_file(
+            source_folder.to_string_lossy().to_string(),
+            root.to_string_lossy().to_string(),
+            false,
+            1,
+            Some(vec![".nc".into(), ".txt".into()]),
+            Some(root.to_string_lossy().to_string()),
+        )
+        .await;
+
+        assert_eq!(result.status, TransferFileStatus::InvalidExtension);
+        assert!(result.is_directory);
+
+        let _ = std::fs::remove_dir_all(root);
         let _ = std::fs::remove_dir_all(source_dir);
     }
 }

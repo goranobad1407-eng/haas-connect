@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::models::{GcodeAnalysis, PreviewData, PreviewKind};
 
@@ -322,37 +322,64 @@ fn minmax(vals: &[f64]) -> Option<(f64, f64)> {
 }
 
 /// Open a file or directory in the OS default application.
-/// On Windows this invokes `explorer.exe <path>`.
+/// On Windows this launches the Shell-associated default app for the resolved path.
 pub fn open_in_default_app(path: &str) -> Result<(), String> {
+    let target = resolve_open_target_path(path)?;
+    let target_str = target.to_string_lossy().to_string();
+
     #[cfg(target_os = "windows")]
     {
-        std::process::Command::new("explorer")
-            .arg(path)
+        use std::os::windows::process::CommandExt;
+
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+        std::process::Command::new("cmd")
+            .arg("/C")
+            .arg("start")
+            .arg("")
+            .arg(&target_str)
+            .creation_flags(CREATE_NO_WINDOW)
             .spawn()
-            .map_err(|e| format!("Failed to open '{path}': {e}"))?;
+            .map_err(|e| format!("Failed to open '{}': {e}", target.display()))?;
         return Ok(());
     }
 
     #[cfg(target_os = "macos")]
     {
         std::process::Command::new("open")
-            .arg(path)
+            .arg(&target_str)
             .spawn()
-            .map_err(|e| format!("Failed to open '{path}': {e}"))?;
+            .map_err(|e| format!("Failed to open '{}': {e}", target.display()))?;
         return Ok(());
     }
 
     #[cfg(target_os = "linux")]
     {
         std::process::Command::new("xdg-open")
-            .arg(path)
+            .arg(&target_str)
             .spawn()
-            .map_err(|e| format!("Failed to open '{path}': {e}"))?;
+            .map_err(|e| format!("Failed to open '{}': {e}", target.display()))?;
         return Ok(());
     }
 
     #[allow(unreachable_code)]
     Err("open_in_default_app: unsupported platform".into())
+}
+
+fn resolve_open_target_path(path: &str) -> Result<PathBuf, String> {
+    let candidate = Path::new(path);
+
+    if !candidate.exists() {
+        return Err(format!("Path does not exist: {path}"));
+    }
+
+    if candidate.is_absolute() {
+        Ok(candidate.to_path_buf())
+    } else {
+        std::env::current_dir()
+            .map(|cwd| cwd.join(candidate))
+            .map_err(|e| format!("Could not resolve path '{path}': {e}"))
+    }
 }
 
 #[cfg(test)]
@@ -417,5 +444,29 @@ mod tests {
     fn strip_comment_removes_after_semicolon() {
         assert_eq!(strip_comment("G0 X5 ; comment"), "G0 X5");
         assert_eq!(strip_comment("M30"), "M30");
+    }
+
+    #[test]
+    fn resolve_open_target_path_rejects_missing_path() {
+        let result = resolve_open_target_path("C:/haas-connect/does-not-exist.pdf");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn resolve_open_target_path_accepts_existing_file() {
+        let temp_file = std::env::temp_dir().join(format!(
+            "haas-open-target-{}.txt",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+
+        std::fs::write(&temp_file, "test").unwrap();
+        let resolved = resolve_open_target_path(temp_file.to_string_lossy().as_ref()).unwrap();
+
+        assert!(resolved.exists());
+
+        let _ = std::fs::remove_file(temp_file);
     }
 }

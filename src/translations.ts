@@ -24,15 +24,25 @@ const translations: Record<Language, Dict> = {
     // Pane action buttons
     "btn.copyToLocal": "Copy to local",
     "btn.chooseFolder": "Choose Folder",
+    "btn.open": "Open",
     "btn.copyToMachine": "Copy to machine",
+    "btn.back": "Back",
+    "btn.forward": "Forward",
+    "btn.up": "Up",
 
     // Machine availability status labels (short, shown in list and pane)
-    "machine.unknown": "—",
+    "machine.unknown": "Not checked",
     "machine.checking": "Checking…",
     "machine.online": "Online",
     "machine.offline": "Offline",
     "machine.timeout": "No response",
     "machine.error": "Error",
+    "machine.badgeUnknown": "Not checked",
+    "machine.badgeChecking": "Checking",
+    "machine.badgeOnline": "Online",
+    "machine.badgeOffline": "Offline",
+    "machine.badgeTimeout": "Timeout",
+    "machine.badgeError": "Error",
 
     // Machine list
     "machine.noMachines":
@@ -68,16 +78,27 @@ const translations: Record<Language, Dict> = {
     "preview.noPreview": "No preview available for {ext}",
     "preview.pdfNote":
       "Open in default PDF viewer to read contents.",
+    "preview.folderSelected":
+      "Folder selected. Double-click to open it or use the transfer buttons to copy it.",
 
     // Preview action buttons
-    "btn.openExternal": "Open externally",
+    "btn.openExternal": "Open in default app",
+    "btn.openFolder": "Open folder",
+    "btn.openPdfViewer": "Open in PDF viewer",
+    "btn.openInGcodeViewer": "Open in G-code viewer",
+    "btn.edit": "Edit",
     "btn.delete": "Delete",
+    "btn.deleteAll": "Delete all",
 
     // Delete confirm dialog
     "preview.deleteConfirm": 'Delete "{name}"?\n\nThis cannot be undone.',
     "preview.deleted": "Deleted: {name}",
     "preview.deleteError": "Delete failed: {error}",
     "preview.openError": "Could not open: {error}",
+    "machine.deleteAllConfirm":
+      "Delete all {count} item(s) in this machine folder?\n\nFolder: {path}\n\nThis cannot be undone.",
+    "machine.deleteAllDone": "Deleted {count} item(s) from the machine folder.",
+    "machine.deleteAllError": "Delete all failed: {error}",
 
     // Transfer messages
     "transfer.copyingToMachine": "Copying '{name}' to machine folder…",
@@ -85,13 +106,15 @@ const translations: Record<Language, Dict> = {
     "transfer.copiedToMachine": "Copied '{name}' to machine folder.",
     "transfer.copiedToLocal": "Copied '{name}' to local folder.",
     "transfer.cancelled":
-      "Copy cancelled. Existing file was left unchanged.",
+      "Copy cancelled. Existing destination content was left unchanged.",
     "transfer.chooseFileFirst":
-      "Choose a file and destination folder before copying.",
+      "Choose a file or folder and destination folder before copying.",
     "transfer.selectMachineFirst":
       "Select an online machine before copying to machine.",
     "transfer.overwritePrompt":
       "{message}\n\nOverwrite '{name}' in the {dest}?",
+    "transfer.overwriteFolderPrompt":
+      "{message}\n\nProceed with folder merge for '{name}' in the {dest}? Existing files with the same name will be overwritten.",
     "transfer.machineDest": "machine folder",
     "transfer.localDest": "local folder",
 
@@ -215,15 +238,25 @@ const translations: Record<Language, Dict> = {
     // Pane action buttons
     "btn.copyToLocal": "Kopiraj lokalno",
     "btn.chooseFolder": "Odaberi mapu",
+    "btn.open": "Otvori",
     "btn.copyToMachine": "Kopiraj na stroj",
+    "btn.back": "Natrag",
+    "btn.forward": "Naprijed",
+    "btn.up": "Gore",
 
     // Machine availability status labels
-    "machine.unknown": "—",
+    "machine.unknown": "Nije provjereno",
     "machine.checking": "Provjera…",
     "machine.online": "Dostupan",
     "machine.offline": "Nedostupan",
     "machine.timeout": "Nema odgovora",
     "machine.error": "Greška",
+    "machine.badgeUnknown": "Nije provjereno",
+    "machine.badgeChecking": "Provjera",
+    "machine.badgeOnline": "Dostupan",
+    "machine.badgeOffline": "Nedostupan",
+    "machine.badgeTimeout": "Timeout",
+    "machine.badgeError": "Greška",
 
     // Machine list
     "machine.noMachines":
@@ -259,16 +292,27 @@ const translations: Record<Language, Dict> = {
     "preview.noPreview": "Pregled nije dostupan za {ext}",
     "preview.pdfNote":
       "Otvorite u zadanom PDF pregledniku za čitanje sadržaja.",
+    "preview.folderSelected":
+      "Mapa je odabrana. Dvaput kliknite za otvaranje ili koristite gumbe za prijenos za kopiranje.",
 
     // Preview action buttons
-    "btn.openExternal": "Otvori",
+    "btn.openExternal": "Otvori u zadanom programu",
+    "btn.openFolder": "Otvori mapu",
+    "btn.openPdfViewer": "Otvori u PDF pregledniku",
+    "btn.openInGcodeViewer": "Otvori u G-code programu",
+    "btn.edit": "Uredi",
     "btn.delete": "Obriši",
+    "btn.deleteAll": "Obriši sve",
 
     // Delete confirm dialog
     "preview.deleteConfirm": 'Obrisati "{name}"?\n\nOvo se ne može poništiti.',
     "preview.deleted": "Obrisano: {name}",
     "preview.deleteError": "Brisanje neuspješno: {error}",
     "preview.openError": "Nije moguće otvoriti: {error}",
+    "machine.deleteAllConfirm":
+      "Obrisati svih {count} stavki u ovoj mapi stroja?\n\nMapa: {path}\n\nOvo se ne može poništiti.",
+    "machine.deleteAllDone": "Obrisano {count} stavki iz mape stroja.",
+    "machine.deleteAllError": "Brisanje svega neuspješno: {error}",
 
     // Transfer messages
     "transfer.copyingToMachine": "Kopiranje '{name}' na stroj…",
@@ -276,13 +320,15 @@ const translations: Record<Language, Dict> = {
     "transfer.copiedToMachine": "Kopirano '{name}' na stroj.",
     "transfer.copiedToLocal": "Kopirano '{name}' lokalno.",
     "transfer.cancelled":
-      "Kopiranje otkazano. Postojeća datoteka nije promijenjena.",
+      "Kopiranje otkazano. Postojeći sadržaj odredišta nije promijenjen.",
     "transfer.chooseFileFirst":
-      "Odaberite datoteku i odredišnu mapu prije kopiranja.",
+      "Odaberite datoteku ili mapu i odredišnu mapu prije kopiranja.",
     "transfer.selectMachineFirst":
       "Odaberite dostupan stroj prije kopiranja na stroj.",
     "transfer.overwritePrompt":
       "{message}\n\nPrepisati '{name}' u {dest}?",
+    "transfer.overwriteFolderPrompt":
+      "{message}\n\nNastaviti sa spajanjem mape '{name}' u {dest}? Postojeće datoteke istog naziva bit će prepisane.",
     "transfer.machineDest": "mapi stroja",
     "transfer.localDest": "lokalnoj mapi",
 
@@ -395,7 +441,7 @@ const translations: Record<Language, Dict> = {
 
 /** Translate a key. Optionally substitute {var} placeholders. */
 export function t(key: string, vars?: Record<string, string>): string {
-  const lang = (state.get("language") ?? "en") as Language;
+  const lang = (state.get("language") ?? "hr") as Language;
   const dict = translations[lang] ?? translations.en;
   let text = dict[key] ?? translations.en[key] ?? key;
   if (vars) {
@@ -411,6 +457,8 @@ export function t(key: string, vars?: Record<string, string>): string {
  * Call on boot and on language change.
  */
 export function applyStaticLabels(): void {
+  document.documentElement.lang = state.get("language") === "hr" ? "hr" : "en";
+
   for (const el of document.querySelectorAll("[data-i18n]")) {
     const key = (el as HTMLElement).dataset.i18n!;
     el.textContent = t(key);
@@ -418,5 +466,13 @@ export function applyStaticLabels(): void {
   for (const el of document.querySelectorAll("[data-i18n-placeholder]")) {
     const key = (el as HTMLElement).dataset.i18nPlaceholder!;
     (el as HTMLInputElement).placeholder = t(key);
+  }
+  for (const el of document.querySelectorAll("[data-i18n-title]")) {
+    const key = (el as HTMLElement).dataset.i18nTitle!;
+    (el as HTMLElement).title = t(key);
+  }
+  for (const el of document.querySelectorAll("[data-i18n-aria-label]")) {
+    const key = (el as HTMLElement).dataset.i18nAriaLabel!;
+    (el as HTMLElement).setAttribute("aria-label", t(key));
   }
 }
