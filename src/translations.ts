@@ -80,6 +80,11 @@ const translations: Record<Language, Dict> = {
       "Open in default PDF viewer to read contents.",
     "preview.folderSelected":
       "Folder selected. Double-click to open it or use the transfer buttons to copy it.",
+    "preview.multiSelectedTitle": "Multiple files selected",
+    "preview.multiSelectedStatus": "{count} items selected",
+    "preview.multiSelectedMeta": "{count} selected items",
+    "preview.multiSelectedMetaWithSize":
+      "{count} selected items • total file size {size}",
 
     // Preview action buttons
     "btn.openExternal": "Open in default app",
@@ -103,8 +108,12 @@ const translations: Record<Language, Dict> = {
     // Transfer messages
     "transfer.copyingToMachine": "Copying '{name}' to machine folder…",
     "transfer.copyingToLocal": "Copying '{name}' to local folder…",
+    "transfer.copyingBatchToMachine":
+      "Copying {count} selected item(s) to machine folder…",
     "transfer.copiedToMachine": "Copied '{name}' to machine folder.",
     "transfer.copiedToLocal": "Copied '{name}' to local folder.",
+    "transfer.batchToMachineSummary":
+      "Machine copy finished: {copied} copied, {skipped} skipped, {failed} failed.",
     "transfer.cancelled":
       "Copy cancelled. Existing destination content was left unchanged.",
     "transfer.chooseFileFirst":
@@ -294,6 +303,11 @@ const translations: Record<Language, Dict> = {
       "Otvorite u zadanom PDF pregledniku za čitanje sadržaja.",
     "preview.folderSelected":
       "Mapa je odabrana. Dvaput kliknite za otvaranje ili koristite gumbe za prijenos za kopiranje.",
+    "preview.multiSelectedTitle": "Odabrano više datoteka",
+    "preview.multiSelectedStatus": "Odabrano {count} stavki",
+    "preview.multiSelectedMeta": "{count} odabranih stavki",
+    "preview.multiSelectedMetaWithSize":
+      "{count} odabranih stavki • ukupna veličina datoteka {size}",
 
     // Preview action buttons
     "btn.openExternal": "Otvori u zadanom programu",
@@ -317,8 +331,12 @@ const translations: Record<Language, Dict> = {
     // Transfer messages
     "transfer.copyingToMachine": "Kopiranje '{name}' na stroj…",
     "transfer.copyingToLocal": "Kopiranje '{name}' lokalno…",
+    "transfer.copyingBatchToMachine":
+      "Kopiranje {count} odabranih stavki na stroj…",
     "transfer.copiedToMachine": "Kopirano '{name}' na stroj.",
     "transfer.copiedToLocal": "Kopirano '{name}' lokalno.",
+    "transfer.batchToMachineSummary":
+      "Kopiranje na stroj završeno: {copied} kopirano, {skipped} preskočeno, {failed} neuspješno.",
     "transfer.cancelled":
       "Kopiranje otkazano. Postojeći sadržaj odredišta nije promijenjen.",
     "transfer.chooseFileFirst":

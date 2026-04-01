@@ -21,6 +21,7 @@ class Store {
     local_breadcrumb: [],
     local_entries: [],
     selected_local_entry: null,
+    selected_local_entries: [],
     active_selection: null,
     preview: null,
     is_loading_machine_directory: false,

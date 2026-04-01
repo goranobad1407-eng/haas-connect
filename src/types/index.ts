@@ -106,6 +106,7 @@ export interface AppState {
   local_breadcrumb: string[];
   local_entries: BrowserEntry[];
   selected_local_entry: BrowserEntry | null;
+  selected_local_entries: BrowserEntry[];
   active_selection: ActivePaneSelection | null;
   preview: PreviewData | null;
   is_loading_machine_directory: boolean;

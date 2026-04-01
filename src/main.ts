@@ -73,6 +73,7 @@ async function autoLoadDefaultLocalPath(path: string): Promise<void> {
         local_breadcrumb: [],
         local_entries: [],
         selected_local_entry: null,
+        selected_local_entries: [],
       });
       await loadLocalDirectory(path, []);
       setStatus(t("status.defaultLocalLoaded"), 3000);

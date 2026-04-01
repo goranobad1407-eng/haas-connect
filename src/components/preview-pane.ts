@@ -3,15 +3,17 @@
 
 import type { ActivePaneSelection, BrowserEntry, PreviewData } from "../types/index";
 import { state } from "../state";
-import { getPreview, deleteEntry, openExternal } from "../api";
+import { getPreview, openExternal } from "../api";
 import { t } from "../translations";
-import { refreshMachineDirectory } from "./file-browser";
+import { confirmAndDeleteMachineEntry } from "./file-browser";
 import { setStatus } from "./status-bar";
 
 const pholderEl = () => document.getElementById("preview-placeholder")!;
 const dataEl = () => document.getElementById("preview-data")!;
 const titleEl = () => document.getElementById("preview-title")!;
 const metaEl = () => document.getElementById("preview-metadata")!;
+const selectionListEl = () =>
+  document.getElementById("preview-selection-list") as HTMLUListElement;
 const paneStatusEl = () =>
   document.getElementById("preview-pane-status") as HTMLSpanElement;
 const breadcrumbEl = () =>
@@ -25,6 +27,8 @@ const LOCAL_EDITABLE_EXTENSIONS = new Set([
   ...LOCAL_GCODE_EXTENSIONS,
   ".txt",
 ]);
+let previewLoadToken = 0;
+let previewRenderScheduled = false;
 
 function showPlaceholder(msg: string): void {
   pholderEl().textContent = msg;
@@ -35,6 +39,29 @@ function showPlaceholder(msg: string): void {
 function showData(): void {
   pholderEl().hidden = true;
   dataEl().hidden = false;
+}
+
+function resetPreviewBody(): void {
+  titleEl().textContent = "";
+  metaEl().textContent = "";
+  selectionListEl().hidden = true;
+  selectionListEl().innerHTML = "";
+  textEl().textContent = "";
+  textEl().hidden = true;
+  topActionEl().innerHTML = "";
+  actionsEl().innerHTML = "";
+}
+
+function scheduleRenderFromState(): void {
+  if (previewRenderScheduled) {
+    return;
+  }
+
+  previewRenderScheduled = true;
+  queueMicrotask(() => {
+    previewRenderScheduled = false;
+    renderFromState();
+  });
 }
 
 function updatePreviewHeader(selection: ActivePaneSelection | null): void {
@@ -54,7 +81,10 @@ async function loadPreview(selection: ActivePaneSelection): Promise<void> {
   const { entry } = selection;
   const config = state.get("config");
   if (!config) return;
+  const requestToken = ++previewLoadToken;
   updatePreviewHeader(selection);
+  resetPreviewBody();
+  state.set("is_loading_preview", false);
 
   if (entry.is_dir) {
     state.set("preview", null);
@@ -85,13 +115,27 @@ async function loadPreview(selection: ActivePaneSelection): Promise<void> {
 
   try {
     const preview = await getPreview(entry.path, config.preview_max_bytes);
+    const current = state.get("active_selection");
+    if (
+      requestToken !== previewLoadToken ||
+      !current ||
+      current.pane !== selection.pane ||
+      current.entry.path !== selection.entry.path
+    ) {
+      return;
+    }
     state.set("preview", preview);
     renderPreview(selection, preview);
   } catch (err) {
+    if (requestToken !== previewLoadToken) {
+      return;
+    }
     showPlaceholder(`Preview error: ${err}`);
     state.set("preview", null);
   } finally {
-    state.set("is_loading_preview", false);
+    if (requestToken === previewLoadToken) {
+      state.set("is_loading_preview", false);
+    }
   }
 }
 
@@ -99,6 +143,8 @@ function renderPreview(
   selection: ActivePaneSelection,
   preview: PreviewData
 ): void {
+  selectionListEl().hidden = true;
+  selectionListEl().innerHTML = "";
   titleEl().textContent = preview.title;
 
   // Metadata section.
@@ -177,25 +223,66 @@ function renderActions(
 }
 
 async function promptDelete(entry: BrowserEntry): Promise<void> {
-  const confirmed = window.confirm(
-    t("preview.deleteConfirm", { name: entry.name })
-  );
-  if (!confirmed) return;
+  await confirmAndDeleteMachineEntry(entry);
+}
 
-  try {
-    await deleteEntry(entry.path);
-    setStatus(t("preview.deleted", { name: entry.name }));
-    // Refresh directory.
-    await refreshMachineDirectory();
-    showPlaceholder(t("preview.selectFile"));
-    state.patch({
-      selected_machine_entry: null,
-      active_selection: null,
-      preview: null,
-    });
-  } catch (err) {
-    setStatus(t("preview.deleteError", { error: String(err) }));
+function renderMultiSelectionSummary(entries: BrowserEntry[]): void {
+  previewLoadToken += 1;
+  state.set("preview", null);
+  state.set("is_loading_preview", false);
+  resetPreviewBody();
+
+  const totalKnownBytes = entries.reduce(
+    (sum, entry) => sum + (entry.size ?? 0),
+    0
+  );
+  const hasKnownSizes = entries.some((entry) => entry.size !== null);
+
+  titleEl().textContent = t("preview.multiSelectedTitle");
+  metaEl().textContent = hasKnownSizes
+    ? t("preview.multiSelectedMetaWithSize", {
+        count: String(entries.length),
+        size: formatSize(totalKnownBytes),
+      })
+    : t("preview.multiSelectedMeta", {
+        count: String(entries.length),
+      });
+
+  for (const entry of entries) {
+    const item = document.createElement("li");
+    item.textContent = entry.name;
+    selectionListEl().appendChild(item);
   }
+
+  selectionListEl().hidden = false;
+  paneStatusEl().textContent = t("preview.multiSelectedStatus", {
+    count: String(entries.length),
+  });
+  breadcrumbEl().textContent = t("preview.multiSelectedStatus", {
+    count: String(entries.length),
+  });
+  showData();
+}
+
+function renderFromState(): void {
+  const localSelections = state.get("selected_local_entries");
+  if (localSelections.length > 1) {
+    renderMultiSelectionSummary(localSelections);
+    return;
+  }
+
+  const selection = state.get("active_selection");
+  if (!selection) {
+    previewLoadToken += 1;
+    updatePreviewHeader(null);
+    resetPreviewBody();
+    state.set("is_loading_preview", false);
+    showPlaceholder(t("preview.selectFile"));
+    state.set("preview", null);
+    return;
+  }
+
+  void loadPreview(selection);
 }
 
 function shouldShowPreviewOpenAction(selection: ActivePaneSelection): boolean {
@@ -238,25 +325,15 @@ function formatSize(bytes: number): string {
 
 /** Wire up state subscriptions. */
 export function initPreviewPane(): void {
-  state.subscribe("active_selection", (selection) => {
-    if (!selection) {
-      updatePreviewHeader(null);
-      showPlaceholder(t("preview.selectFile"));
-      state.set("preview", null);
-      return;
-    }
-    void loadPreview(selection);
+  state.subscribe("active_selection", () => {
+    scheduleRenderFromState();
+  });
+  state.subscribe("selected_local_entries", () => {
+    scheduleRenderFromState();
   });
 
   // Update placeholder text on language change if nothing is selected.
   state.subscribe("language", () => {
-    const selection = state.get("active_selection");
-    if (!selection) {
-      updatePreviewHeader(null);
-      showPlaceholder(t("preview.selectFile"));
-      return;
-    }
-
-    updatePreviewHeader(selection);
+    scheduleRenderFromState();
   });
 }
