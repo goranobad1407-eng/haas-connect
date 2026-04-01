@@ -13,10 +13,10 @@
     "windows": [
       {
         "title": "HAAS CNC Connect",
-        "width": 1280,
-        "height": 760,
-        "minWidth": 1260,
-        "minHeight": 700,
+        "width": 1400,
+        "height": 780,
+        "minWidth": 1380,
+        "minHeight": 720,
         "resizable": true,
         "fullscreen": false,
         "decorations": true,

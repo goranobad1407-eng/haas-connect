@@ -45,7 +45,7 @@
         <section id="browser-panel">
           <div id="transfer-workspace">
             <section class="transfer-pane">
-              <div class="pane-toolbar">
+              <div class="pane-toolbar pane-toolbar-machine">
                 <div class="pane-heading">
                   <span class="pane-title" data-i18n="pane.machine">Stroj</span>
                   <span id="machine-pane-status" class="pane-subtitle">Odaberite stroj</span>
@@ -80,7 +80,7 @@
             ></div>
 
             <section class="transfer-pane">
-              <div class="pane-toolbar">
+              <div class="pane-toolbar pane-toolbar-local">
                 <div class="pane-heading">
                   <span class="pane-title" data-i18n="pane.local">Lokalno</span>
                   <span id="local-pane-status" class="pane-subtitle">Odaberite lokalnu radnu mapu</span>
@@ -97,40 +97,55 @@
                   </button>
                 </div>
               </div>
-              <div class="pane-breadcrumb pane-breadcrumb-with-nav">
-                <div class="pane-nav-controls">
-                  <button
-                    id="btn-local-back"
-                    class="btn-ghost btn-inline btn-nav"
-                    type="button"
-                    disabled
-                    data-i18n-title="btn.back"
-                    data-i18n-aria-label="btn.back"
-                  >
-                    ←
-                  </button>
-                  <button
-                    id="btn-local-forward"
-                    class="btn-ghost btn-inline btn-nav"
-                    type="button"
-                    disabled
-                    data-i18n-title="btn.forward"
-                    data-i18n-aria-label="btn.forward"
-                  >
-                    →
-                  </button>
-                  <button
-                    id="btn-local-up"
-                    class="btn-ghost btn-inline btn-nav"
-                    type="button"
-                    disabled
-                    data-i18n-title="btn.up"
-                    data-i18n-aria-label="btn.up"
-                  >
-                    ↑
-                  </button>
+              <div class="pane-top-stack pane-top-stack-local">
+                <div class="pane-breadcrumb pane-breadcrumb-with-nav">
+                  <div class="pane-nav-controls">
+                    <button
+                      id="btn-local-back"
+                      class="btn-ghost btn-inline btn-nav"
+                      type="button"
+                      disabled
+                      data-i18n-title="btn.back"
+                      data-i18n-aria-label="btn.back"
+                    >
+                      ←
+                    </button>
+                    <button
+                      id="btn-local-forward"
+                      class="btn-ghost btn-inline btn-nav"
+                      type="button"
+                      disabled
+                      data-i18n-title="btn.forward"
+                      data-i18n-aria-label="btn.forward"
+                    >
+                      →
+                    </button>
+                    <button
+                      id="btn-local-up"
+                      class="btn-ghost btn-inline btn-nav"
+                      type="button"
+                      disabled
+                      data-i18n-title="btn.up"
+                      data-i18n-aria-label="btn.up"
+                    >
+                      ↑
+                    </button>
+                  </div>
+                  <div id="local-breadcrumb" class="pane-breadcrumb-text">Odaberite lokalnu radnu mapu</div>
                 </div>
-                <div id="local-breadcrumb" class="pane-breadcrumb-text">Odaberite lokalnu radnu mapu</div>
+                <div class="pane-search-row">
+                  <label class="pane-search">
+                    <input
+                      id="local-search-input"
+                      class="pane-search-input"
+                      type="search"
+                      autocomplete="off"
+                      spellcheck="false"
+                      placeholder="Pretraži naziv mape ili datoteke"
+                      data-i18n-placeholder="pane.localSearchPlaceholder"
+                    />
+                  </label>
+                </div>
               </div>
               <div class="pane-list-container">
                 <div id="local-file-list-placeholder" class="placeholder-text">

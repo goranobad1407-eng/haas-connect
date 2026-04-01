@@ -24,10 +24,10 @@ body {
   --timeout:   #e67e22;
   --checking:  #3498db;
   --unknown:   #95a5a6;
-  --pane-toolbar-height: 56px;
-  --pane-breadcrumb-height: 34px;
-  --sidebar-width: 220px;
-  --preview-width: 280px;
+  --pane-toolbar-height: 60px;
+  --pane-breadcrumb-height: 42px;
+  --sidebar-width: 230px;
+  --preview-width: 320px;
   --transfer-left-width: 1fr;
   --splitter-size: 6px;
   --splitter-hit-size: 10px;
@@ -102,7 +102,7 @@ select,
   grid-template-columns:
     var(--sidebar-width)
     var(--splitter-size)
-    minmax(520px, 1fr)
+    minmax(660px, 1fr)
     var(--splitter-size)
     var(--preview-width);
   flex: 1;
@@ -129,7 +129,6 @@ select,
   display: flex;
   flex-direction: column;
   min-height: 0;
-  border-right: 1px solid var(--border);
   background: var(--panel-bg);
   overflow: hidden;
 }
@@ -359,12 +358,13 @@ select,
 #transfer-workspace {
   display: grid;
   grid-template-columns:
-    minmax(240px, var(--transfer-left-width))
+    minmax(260px, var(--transfer-left-width))
     var(--splitter-size)
-    minmax(280px, 1fr);
+    minmax(360px, 1fr);
   gap: 0;
   flex: 1;
   min-height: 0;
+  background: var(--panel-bg);
 }
 
 .transfer-pane {
@@ -372,6 +372,7 @@ select,
   flex-direction: column;
   min-width: 0;
   min-height: 0;
+  background: #fff;
 }
 
 .pane-toolbar {
@@ -384,6 +385,14 @@ select,
   padding: 8px 12px;
   border-bottom: 1px solid var(--border);
   background: var(--panel-bg);
+}
+
+.pane-toolbar-local {
+  padding-bottom: 10px;
+}
+
+.pane-toolbar-local .pane-actions {
+  gap: 8px;
 }
 
 .pane-heading {
@@ -440,14 +449,30 @@ select,
   text-overflow: ellipsis;
 }
 
+.pane-top-stack {
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+  border-bottom: 1px solid var(--border);
+}
+
+.pane-top-stack .pane-breadcrumb {
+  border-bottom: 1px solid var(--border);
+}
+
+.pane-top-stack-local .pane-breadcrumb {
+  padding-top: 8px;
+  padding-bottom: 8px;
+}
+
 .pane-breadcrumb-with-nav {
-  gap: 8px;
+  gap: 12px;
 }
 
 .pane-nav-controls {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 8px;
   flex-shrink: 0;
 }
 
@@ -455,20 +480,42 @@ select,
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  min-width: 28px;
+  width: 48px;
+  height: 40px;
+  min-width: 48px;
   padding: 0;
+  border-color: #7ea8d9;
+  background: linear-gradient(180deg, #eef6ff 0%, #d8e9fb 100%);
+  color: #0f4c89;
+  font-size: 19px;
   font-weight: 700;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9);
+}
+
+.btn-nav:hover {
+  background: linear-gradient(180deg, #e2f0ff 0%, #c7def6 100%);
+  border-color: #4f88c6;
+  color: #0b3f73;
+}
+
+.btn-nav:active {
+  background: linear-gradient(180deg, #d3e6fb 0%, #bfd9f5 100%);
+  border-color: #3c78ba;
 }
 
 .btn-nav:disabled {
-  opacity: 0.45;
+  opacity: 1;
   cursor: default;
+  color: #7d93a8;
+  border-color: #bfd1e5;
+  background: linear-gradient(180deg, #f6f9fc 0%, #ecf2f8 100%);
+  box-shadow: none;
 }
 
 .btn-nav:disabled:hover {
-  background: none;
-  color: var(--text-muted);
+  color: #7d93a8;
+  border-color: #bfd1e5;
+  background: linear-gradient(180deg, #f6f9fc 0%, #ecf2f8 100%);
 }
 
 .pane-breadcrumb-text {
@@ -477,6 +524,35 @@ select,
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.pane-search {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  width: 100%;
+}
+
+.pane-search-row {
+  display: flex;
+  align-items: center;
+  padding: 8px 12px 10px;
+  background: #fff;
+}
+
+.pane-search-input {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 6px 8px;
+  font: inherit;
+  color: var(--text);
+  background: #fff;
+}
+
+.pane-search-input::placeholder {
+  color: var(--text-muted);
 }
 
 .crumb-link {
@@ -553,7 +629,6 @@ select,
   display: flex;
   flex-direction: column;
   min-height: 0;
-  border-left: 1px solid var(--border);
   background: var(--panel-bg);
   overflow: hidden;
 }
@@ -1084,6 +1159,15 @@ select,
   .pane-breadcrumb {
     height: auto;
     min-height: var(--pane-breadcrumb-height);
+  }
+
+  .pane-top-stack-local .pane-breadcrumb {
+    min-height: var(--pane-breadcrumb-height);
+    height: auto;
+  }
+
+  .pane-search-row {
+    padding-top: 6px;
   }
 
   #status-bar {

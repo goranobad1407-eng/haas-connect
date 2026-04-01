@@ -53,6 +53,8 @@ const localForwardButton = () =>
   document.getElementById("btn-local-forward") as HTMLButtonElement;
 const localUpButton = () =>
   document.getElementById("btn-local-up") as HTMLButtonElement;
+const localSearchInput = () =>
+  document.getElementById("local-search-input") as HTMLInputElement;
 const copyToMachineButton = () =>
   document.getElementById("btn-copy-to-machine") as HTMLButtonElement;
 const appRootEl = () =>
@@ -84,12 +86,13 @@ let contextMenuTarget: { pane: PaneKind; entry: BrowserEntry } | null = null;
 let localNavigationHistory: LocalNavigationEntry[] = [];
 let localNavigationIndex = -1;
 let localSelectionAnchorPath: string | null = null;
+let localSearchQuery = "";
 
-const SIDEBAR_MIN_WIDTH = 220;
-const CENTER_MIN_WIDTH = 520;
-const PREVIEW_MIN_WIDTH = 280;
-const TRANSFER_LEFT_MIN_WIDTH = 240;
-const TRANSFER_RIGHT_MIN_WIDTH = 280;
+const SIDEBAR_MIN_WIDTH = 230;
+const CENTER_MIN_WIDTH = 660;
+const PREVIEW_MIN_WIDTH = 320;
+const TRANSFER_LEFT_MIN_WIDTH = 260;
+const TRANSFER_RIGHT_MIN_WIDTH = 360;
 const SPLITTER_STORAGE_KEYS = {
   sidebar: "haas-connect-sidebar-width",
   preview: "haas-connect-preview-width",
@@ -131,6 +134,17 @@ function getBreadcrumb(pane: PaneKind): string[] {
   return pane === "machine"
     ? state.get("machine_breadcrumb")
     : state.get("local_breadcrumb");
+}
+
+function getFilteredLocalEntries(entries: BrowserEntry[]): BrowserEntry[] {
+  const query = localSearchQuery.trim().toLocaleLowerCase();
+  if (!query) {
+    return entries;
+  }
+
+  return entries.filter((entry) =>
+    entry.name.toLocaleLowerCase().includes(query)
+  );
 }
 
 function isLocalExternallyOpenable(
@@ -205,6 +219,46 @@ function setTransferLeftWidth(value: number): void {
   transferWorkspaceEl().style.setProperty("--transfer-left-width", `${Math.round(value)}px`);
 }
 
+function enforcePaneLayoutMinimums(): void {
+  const layoutWidth = mainLayoutEl().clientWidth;
+  if (layoutWidth > 0) {
+    const safeSidebarMax = Math.max(
+      SIDEBAR_MIN_WIDTH,
+      layoutWidth - CENTER_MIN_WIDTH - PREVIEW_MIN_WIDTH - 12
+    );
+    const sidebarWidth = clamp(machinePanelWidth(), SIDEBAR_MIN_WIDTH, safeSidebarMax);
+    setMainLayoutWidth("--sidebar-width", sidebarWidth);
+    storeNumber(SPLITTER_STORAGE_KEYS.sidebar, sidebarWidth);
+
+    const safePreviewMax = Math.max(
+      PREVIEW_MIN_WIDTH,
+      layoutWidth - sidebarWidth - CENTER_MIN_WIDTH - 12
+    );
+    const previewWidth = clamp(
+      previewPanelEl().getBoundingClientRect().width,
+      PREVIEW_MIN_WIDTH,
+      safePreviewMax
+    );
+    setMainLayoutWidth("--preview-width", previewWidth);
+    storeNumber(SPLITTER_STORAGE_KEYS.preview, previewWidth);
+  }
+
+  const workspaceWidth = transferWorkspaceEl().clientWidth;
+  if (workspaceWidth > 0) {
+    const safeTransferLeftMax = Math.max(
+      TRANSFER_LEFT_MIN_WIDTH,
+      workspaceWidth - TRANSFER_RIGHT_MIN_WIDTH - 6
+    );
+    const leftWidth = clamp(
+      machineTransferPaneWidth(),
+      TRANSFER_LEFT_MIN_WIDTH,
+      safeTransferLeftMax
+    );
+    setTransferLeftWidth(leftWidth);
+    storeNumber(SPLITTER_STORAGE_KEYS.transferLeft, leftWidth);
+  }
+}
+
 function initPaneSplitters(): void {
   const storedSidebar = readStoredNumber(SPLITTER_STORAGE_KEYS.sidebar);
   const storedPreview = readStoredNumber(SPLITTER_STORAGE_KEYS.preview);
@@ -219,6 +273,9 @@ function initPaneSplitters(): void {
   if (storedTransferLeft !== null) {
     setTransferLeftWidth(Math.max(TRANSFER_LEFT_MIN_WIDTH, storedTransferLeft));
   }
+
+  enforcePaneLayoutMinimums();
+  window.addEventListener("resize", enforcePaneLayoutMinimums);
 
   bindHorizontalSplitter({
     handle: machineBrowserSplitterEl(),
@@ -457,13 +514,20 @@ function renderEntries(pane: PaneKind, entries: BrowserEntry[]): void {
   const list = pane === "machine" ? machineListEl() : localListEl();
   list.innerHTML = "";
 
-  if (entries.length === 0) {
-    showPlaceholder(pane, t("pane.dirEmpty"));
+  const visibleEntries =
+    pane === "local" ? getFilteredLocalEntries(entries) : entries;
+
+  if (visibleEntries.length === 0) {
+    const message =
+      pane === "local" && localSearchQuery.trim()
+        ? t("pane.localNoMatches", { query: localSearchQuery.trim() })
+        : t("pane.dirEmpty");
+    showPlaceholder(pane, message);
     return;
   }
 
   showList(pane);
-  for (const entry of entries) {
+  for (const entry of visibleEntries) {
     list.appendChild(buildEntryItem(pane, entry));
   }
 }
@@ -524,6 +588,34 @@ function syncLocalSelectionVisual(selectedPaths: Set<string>): void {
     }
     row.classList.toggle("entry-selected", selectedPaths.has(row.dataset.path ?? ""));
   }
+}
+
+function updateLocalSearchInput(): void {
+  localSearchInput().value = localSearchQuery;
+}
+
+function resetLocalSearch(): void {
+  if (!localSearchQuery) {
+    return;
+  }
+
+  localSearchQuery = "";
+  updateLocalSearchInput();
+}
+
+function handleLocalSearchInput(): void {
+  const nextQuery = localSearchInput().value;
+  if (nextQuery === localSearchQuery) {
+    return;
+  }
+
+  localSearchQuery = nextQuery;
+  if (getSelectedLocalEntries().length > 0) {
+    clearPaneSelection("local");
+    clearPaneSelectionVisual("machine");
+  }
+  renderEntries("local", state.get("local_entries"));
+  updateTransferButtons();
 }
 
 function setLocalSelection(
@@ -898,6 +990,10 @@ export async function loadLocalDirectory(
 ): Promise<BrowserEntry[]> {
   hideContextMenu();
   localSelectionAnchorPath = null;
+
+  if (state.get("local_current_path") !== path) {
+    resetLocalSearch();
+  }
 
   state.patch({
     local_current_path: path,
@@ -1328,6 +1424,7 @@ function formatSize(bytes: number): string {
 export function initFileBrowser(): void {
   bindAppContextMenu();
   initPaneSplitters();
+  updateLocalSearchInput();
 
   chooseLocalFolderButton().addEventListener("click", () => {
     void chooseLocalRoot();
@@ -1343,6 +1440,9 @@ export function initFileBrowser(): void {
   });
   localUpButton().addEventListener("click", () => {
     void navigateLocalUp();
+  });
+  localSearchInput().addEventListener("input", () => {
+    handleLocalSearchInput();
   });
   copyToMachineButton().addEventListener("click", () => {
     void runTransfer("to_machine");
@@ -1421,6 +1521,7 @@ export function initFileBrowser(): void {
   // On language change: update all text in the pane that depends on state.
   state.subscribe("language", () => {
     applyStaticLabels();
+    updateLocalSearchInput();
     updateMachinePaneStatus();
     updateLocalPaneStatus();
 
@@ -1440,10 +1541,16 @@ export function initFileBrowser(): void {
     }
 
     // Refresh local pane placeholder if no files are showing.
+    const localEntries = state.get("local_entries");
     if (!state.get("local_root")) {
       showPlaceholder("local", t("pane.localEmpty"));
-    } else if (state.get("local_entries").length === 0) {
+    } else if (localEntries.length === 0) {
       showPlaceholder("local", t("pane.dirEmpty"));
+    } else if (
+      localSearchQuery.trim() &&
+      getFilteredLocalEntries(localEntries).length === 0
+    ) {
+      showPlaceholder("local", t("pane.localNoMatches", { query: localSearchQuery.trim() }));
     }
   });
 

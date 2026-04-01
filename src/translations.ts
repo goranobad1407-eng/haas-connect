@@ -70,6 +70,8 @@ const translations: Record<Language, Dict> = {
     "pane.localEmpty":
       "Choose a local work folder to browse CNC files.",
     "pane.localLoading": "Loading local folder…",
+    "pane.localSearchPlaceholder": "Search folder or file name",
+    "pane.localNoMatches": 'No local entries match "{query}"',
     "pane.dirEmpty": "Directory is empty",
 
     // Preview pane
@@ -293,6 +295,8 @@ const translations: Record<Language, Dict> = {
     "pane.localEmpty":
       "Odaberite lokalnu radnu mapu za pregled CNC datoteka.",
     "pane.localLoading": "Učitavanje lokalne mape…",
+    "pane.localSearchPlaceholder": "Pretraži naziv mape ili datoteke",
+    "pane.localNoMatches": 'Nema lokalnih stavki za "{query}"',
     "pane.dirEmpty": "Mapa je prazna",
 
     // Preview pane
