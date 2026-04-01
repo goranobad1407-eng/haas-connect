@@ -48,10 +48,20 @@ const copyToMachineButton = () =>
   document.getElementById("btn-copy-to-machine") as HTMLButtonElement;
 const appRootEl = () =>
   document.getElementById("app") as HTMLElement;
+const mainLayoutEl = () =>
+  document.getElementById("main-layout") as HTMLElement;
 const browserPanelEl = () =>
   document.getElementById("browser-panel") as HTMLElement;
+const transferWorkspaceEl = () =>
+  document.getElementById("transfer-workspace") as HTMLElement;
 const previewPanelEl = () =>
   document.getElementById("preview-panel") as HTMLElement;
+const machineBrowserSplitterEl = () =>
+  document.getElementById("splitter-machine-browser") as HTMLDivElement;
+const transferSplitterEl = () =>
+  document.getElementById("splitter-transfer") as HTMLDivElement;
+const browserPreviewSplitterEl = () =>
+  document.getElementById("splitter-browser-preview") as HTMLDivElement;
 const contextMenuEl = () =>
   document.getElementById("file-context-menu") as HTMLDivElement;
 const contextMenuDeleteButton = () =>
@@ -64,6 +74,17 @@ type LocalNavigationEntry = { path: string; breadcrumb: string[] };
 let contextMenuTarget: { pane: PaneKind; entry: BrowserEntry } | null = null;
 let localNavigationHistory: LocalNavigationEntry[] = [];
 let localNavigationIndex = -1;
+
+const SIDEBAR_MIN_WIDTH = 220;
+const CENTER_MIN_WIDTH = 520;
+const PREVIEW_MIN_WIDTH = 280;
+const TRANSFER_LEFT_MIN_WIDTH = 240;
+const TRANSFER_RIGHT_MIN_WIDTH = 280;
+const SPLITTER_STORAGE_KEYS = {
+  sidebar: "haas-connect-sidebar-width",
+  preview: "haas-connect-preview-width",
+  transferLeft: "haas-connect-transfer-left-width",
+} as const;
 
 function buildPath(base: string, crumbs: string[]): string {
   let path = base.replace(/\\/g, "/").replace(/\/$/, "");
@@ -126,6 +147,170 @@ function recordLocalNavigation(path: string, breadcrumb: string[]): void {
     breadcrumb: [...breadcrumb],
   });
   localNavigationIndex = localNavigationHistory.length - 1;
+}
+
+function readStoredNumber(key: string): number | null {
+  try {
+    const raw = window.localStorage.getItem(key);
+    if (!raw) {
+      return null;
+    }
+    const value = Number(raw);
+    return Number.isFinite(value) ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+function storeNumber(key: string, value: number): void {
+  try {
+    window.localStorage.setItem(key, String(Math.round(value)));
+  } catch {
+    // Ignore storage failures and keep split sizes session-live only.
+  }
+}
+
+function setMainLayoutWidth(variable: "--sidebar-width" | "--preview-width", value: number): void {
+  mainLayoutEl().style.setProperty(variable, `${Math.round(value)}px`);
+}
+
+function setTransferLeftWidth(value: number): void {
+  transferWorkspaceEl().style.setProperty("--transfer-left-width", `${Math.round(value)}px`);
+}
+
+function initPaneSplitters(): void {
+  const storedSidebar = readStoredNumber(SPLITTER_STORAGE_KEYS.sidebar);
+  const storedPreview = readStoredNumber(SPLITTER_STORAGE_KEYS.preview);
+  const storedTransferLeft = readStoredNumber(SPLITTER_STORAGE_KEYS.transferLeft);
+
+  if (storedSidebar !== null) {
+    setMainLayoutWidth("--sidebar-width", Math.max(SIDEBAR_MIN_WIDTH, storedSidebar));
+  }
+  if (storedPreview !== null) {
+    setMainLayoutWidth("--preview-width", Math.max(PREVIEW_MIN_WIDTH, storedPreview));
+  }
+  if (storedTransferLeft !== null) {
+    setTransferLeftWidth(Math.max(TRANSFER_LEFT_MIN_WIDTH, storedTransferLeft));
+  }
+
+  bindHorizontalSplitter({
+    handle: machineBrowserSplitterEl(),
+    onStart: () => {
+      const previousPanel = machineBrowserSplitterEl().previousElementSibling;
+      return {
+        containerWidth: mainLayoutEl().clientWidth,
+        startSidebarWidth:
+          previousPanel instanceof HTMLElement
+            ? previousPanel.getBoundingClientRect().width
+            : SIDEBAR_MIN_WIDTH,
+      };
+    },
+    onMove: (deltaX, ctx) => {
+      const maxSidebar = ctx.containerWidth - CENTER_MIN_WIDTH - PREVIEW_MIN_WIDTH - 12;
+      const next = clamp(ctx.startSidebarWidth + deltaX, SIDEBAR_MIN_WIDTH, maxSidebar);
+      setMainLayoutWidth("--sidebar-width", next);
+      storeNumber(SPLITTER_STORAGE_KEYS.sidebar, next);
+    },
+  });
+
+  bindHorizontalSplitter({
+    handle: browserPreviewSplitterEl(),
+    onStart: () => ({
+      containerWidth: mainLayoutEl().clientWidth,
+      startPreviewWidth: previewPanelEl().getBoundingClientRect().width,
+    }),
+    onMove: (deltaX, ctx) => {
+      const sidebarWidth = machinePanelWidth();
+      const maxPreview =
+        ctx.containerWidth - sidebarWidth - CENTER_MIN_WIDTH - 12;
+      const next = clamp(ctx.startPreviewWidth - deltaX, PREVIEW_MIN_WIDTH, maxPreview);
+      setMainLayoutWidth("--preview-width", next);
+      storeNumber(SPLITTER_STORAGE_KEYS.preview, next);
+    },
+  });
+
+  bindHorizontalSplitter({
+    handle: transferSplitterEl(),
+    onStart: () => ({
+      containerWidth: transferWorkspaceEl().clientWidth,
+      startLeftWidth: machineTransferPaneWidth(),
+    }),
+    onMove: (deltaX, ctx) => {
+      const maxLeft = ctx.containerWidth - TRANSFER_RIGHT_MIN_WIDTH - 6;
+      const next = clamp(
+        ctx.startLeftWidth + deltaX,
+        TRANSFER_LEFT_MIN_WIDTH,
+        maxLeft
+      );
+      setTransferLeftWidth(next);
+      storeNumber(SPLITTER_STORAGE_KEYS.transferLeft, next);
+    },
+  });
+}
+
+function machinePanelWidth(): number {
+  const panel = document.getElementById("machine-panel");
+  return panel instanceof HTMLElement
+    ? panel.getBoundingClientRect().width
+    : SIDEBAR_MIN_WIDTH;
+}
+
+function machineTransferPaneWidth(): number {
+  const pane = transferWorkspaceEl().querySelector(".transfer-pane");
+  return pane instanceof HTMLElement
+    ? pane.getBoundingClientRect().width
+    : TRANSFER_LEFT_MIN_WIDTH;
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max);
+}
+
+function bindHorizontalSplitter<TContext>({
+  handle,
+  onStart,
+  onMove,
+}: {
+  handle: HTMLDivElement;
+  onStart: () => TContext;
+  onMove: (deltaX: number, context: TContext) => void;
+}): void {
+  handle.addEventListener("pointerdown", (event) => {
+    event.preventDefault();
+    const startX = event.clientX;
+    const context = onStart();
+
+    handle.classList.add("dragging");
+    handle.setPointerCapture(event.pointerId);
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+
+    const onPointerMove = (moveEvent: PointerEvent) => {
+      onMove(moveEvent.clientX - startX, context);
+    };
+
+    const stopDragging = (pointerId: number) => {
+      handle.classList.remove("dragging");
+      document.body.style.removeProperty("cursor");
+      document.body.style.removeProperty("user-select");
+      handle.releasePointerCapture(pointerId);
+      handle.removeEventListener("pointermove", onPointerMove);
+      handle.removeEventListener("pointerup", onPointerUp);
+      handle.removeEventListener("pointercancel", onPointerCancel);
+    };
+
+    const onPointerUp = (upEvent: PointerEvent) => {
+      stopDragging(upEvent.pointerId);
+    };
+
+    const onPointerCancel = (cancelEvent: PointerEvent) => {
+      stopDragging(cancelEvent.pointerId);
+    };
+
+    handle.addEventListener("pointermove", onPointerMove);
+    handle.addEventListener("pointerup", onPointerUp);
+    handle.addEventListener("pointercancel", onPointerCancel);
+  });
 }
 
 function updateLocalNavigationButtons(): void {
@@ -930,6 +1115,7 @@ function formatSize(bytes: number): string {
 
 export function initFileBrowser(): void {
   bindAppContextMenu();
+  initPaneSplitters();
 
   chooseLocalFolderButton().addEventListener("click", () => {
     void chooseLocalRoot();

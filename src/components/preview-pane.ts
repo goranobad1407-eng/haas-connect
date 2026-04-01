@@ -18,6 +18,7 @@ const breadcrumbEl = () =>
   document.getElementById("preview-breadcrumb") as HTMLDivElement;
 const textEl = () =>
   document.getElementById("preview-text-content") as HTMLPreElement;
+const topActionEl = () => document.getElementById("preview-primary-action")!;
 const actionsEl = () => document.getElementById("preview-actions")!;
 const LOCAL_GCODE_EXTENSIONS = new Set([".nc", ".tap", ".cnc"]);
 const LOCAL_EDITABLE_EXTENSIONS = new Set([
@@ -145,12 +146,14 @@ function renderActions(
   _preview: PreviewData | null
 ): void {
   const { entry, pane } = selection;
-  const el = actionsEl();
-  el.innerHTML = "";
+  const topEl = topActionEl();
+  const bottomEl = actionsEl();
+  topEl.innerHTML = "";
+  bottomEl.innerHTML = "";
 
   if (shouldShowPreviewOpenAction(selection)) {
     const openBtn = document.createElement("button");
-    openBtn.className = "btn-action";
+    openBtn.className = "btn-action btn-action-primary";
     openBtn.textContent = getOpenActionLabel(selection);
     openBtn.addEventListener("click", async () => {
       try {
@@ -159,7 +162,7 @@ function renderActions(
         setStatus(t("preview.openError", { error: String(err) }));
       }
     });
-    el.appendChild(openBtn);
+    topEl.appendChild(openBtn);
   }
 
   // Delete (only if machine is not protected).
@@ -169,7 +172,7 @@ function renderActions(
     delBtn.className = "btn-action btn-danger";
     delBtn.textContent = t("btn.delete");
     delBtn.addEventListener("click", () => promptDelete(entry));
-    el.appendChild(delBtn);
+    bottomEl.appendChild(delBtn);
   }
 }
 
