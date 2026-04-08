@@ -22,7 +22,7 @@ const translations: Record<Language, Dict> = {
     "pane.local": "Local",
 
     // Pane action buttons
-    "btn.copyToLocal": "Copy to local",
+    "btn.copyToLocal": "Copy to server",
     "btn.chooseFolder": "Choose Folder",
     "btn.open": "Open",
     "btn.copyToMachine": "Copy to machine",
@@ -247,7 +247,7 @@ const translations: Record<Language, Dict> = {
     "pane.local": "Lokalno",
 
     // Pane action buttons
-    "btn.copyToLocal": "Kopiraj lokalno",
+    "btn.copyToLocal": "Kopiraj na server",
     "btn.chooseFolder": "Odaberi mapu",
     "btn.open": "Otvori",
     "btn.copyToMachine": "Kopiraj na stroj",
