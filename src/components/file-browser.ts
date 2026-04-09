@@ -1473,10 +1473,12 @@ function updateTransferButtons(): void {
     : "unknown";
   const selectedLocalEntries = getSelectedLocalEntries();
   const selectedMachineEntries = getSelectedMachineEntries();
+  // Allow delete if we have a machine path and machine is not protected.
+  // Do NOT require status === "online"—network paths may show timeout/offline
+  // even when operations work. The actual delete will succeed or fail truthfully.
   const machineDeleteAllowed =
     !!machine &&
     !machine.protected &&
-    machineStatus === "online" &&
     !!state.get("machine_current_path");
 
   copyToMachineButton().disabled =
@@ -2132,19 +2134,36 @@ export function initFileBrowser(): void {
     }
 
     if (status === "offline" || status === "timeout" || status === "error") {
-      clearPaneSelection("machine");
-      state.patch({
-        machine_current_path: null,
-        machine_breadcrumb: [],
-        machine_entries: [],
-      });
+      // Show warning but DO NOT clear machine state—user may still want to
+      // perform operations like delete even if availability check failed.
+      // The actual operation will succeed or fail with a truthful error.
       const message =
         status === "offline"
           ? t("pane.machineUnavailable")
           : status === "timeout"
             ? t("pane.machineNoResponse")
             : t("pane.machineCheckFailed");
-      showPlaceholder("machine", message);
+      // Only show placeholder if we have no entries loaded yet.
+      if (state.get("machine_entries").length === 0) {
+        showPlaceholder("machine", message);
+      } else {
+        // Show status but keep current entries visible.
+        const statusLabel: Record<AvailabilityStatus, string> = {
+          unknown: t("machine.unknown"),
+          checking: t("machine.checking"),
+          online: t("machine.online"),
+          offline: t("machine.offline"),
+          timeout: t("machine.timeout"),
+          error: t("machine.error"),
+        };
+        setStatus(
+          t("status.machineStatus", {
+            name: machine.name,
+            status: statusLabel[status],
+            path: machine.path,
+          })
+        );
+      }
       updateTransferButtons();
     }
   });
