@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use serde::Deserialize;
 
 use crate::models::{AppConfig, LocationType, MachineProfile, MachineProfilesValidation};
+use crate::path_guard::normalize_machine_path;
 
 const CONFIG_FILENAME: &str = "machines.json";
 const LEGACY_FILENAME: &str = "config.json";
@@ -77,8 +78,12 @@ pub fn load_machine_profiles() -> Vec<MachineProfile> {
 
 pub fn save_config(config: &AppConfig, path: &Path) -> Result<(), String> {
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|e| format!("Failed to create config directory '{}': {e}", parent.display()))?;
+        std::fs::create_dir_all(parent).map_err(|e| {
+            format!(
+                "Failed to create config directory '{}': {e}",
+                parent.display()
+            )
+        })?;
     }
     let json =
         serde_json::to_string_pretty(config).map_err(|e| format!("Serialisation error: {e}"))?;
@@ -120,7 +125,10 @@ fn push_local_candidates(candidates: &mut Vec<PathBuf>, dir: &Path) {
     let machine_path = dir.join(CONFIG_FILENAME);
     let legacy_path = dir.join(LEGACY_FILENAME);
 
-    if !candidates.iter().any(|candidate| candidate == &machine_path) {
+    if !candidates
+        .iter()
+        .any(|candidate| candidate == &machine_path)
+    {
         candidates.push(machine_path);
     }
     if !candidates.iter().any(|candidate| candidate == &legacy_path) {
@@ -137,9 +145,9 @@ fn local_app_config_path() -> Option<PathBuf> {
 }
 
 fn is_local_v2_config_path(path: &Path) -> bool {
-    local_config_candidates()
-        .into_iter()
-        .any(|candidate| candidate == path && candidate.file_name() == Some(OsStr::new(CONFIG_FILENAME)))
+    local_config_candidates().into_iter().any(|candidate| {
+        candidate == path && candidate.file_name() == Some(OsStr::new(CONFIG_FILENAME))
+    })
 }
 
 fn is_under_program_files(path: &Path) -> bool {
@@ -163,7 +171,10 @@ fn is_under_program_files(path: &Path) -> bool {
 }
 
 fn path_starts_with_case_insensitive(path: &Path, root: &Path) -> bool {
-    let path = path.to_string_lossy().replace('/', "\\").to_ascii_lowercase();
+    let path = path
+        .to_string_lossy()
+        .replace('/', "\\")
+        .to_ascii_lowercase();
     let root = root
         .to_string_lossy()
         .replace('/', "\\")
@@ -185,10 +196,8 @@ pub fn validate_machine_profiles(profiles: &[MachineProfile]) -> MachineProfiles
     let mut ids_seen = HashSet::new();
     let mut names_seen = HashSet::new();
 
-    for (index, (raw_machine, machine)) in profiles
-        .iter()
-        .zip(normalized_profiles.iter())
-        .enumerate()
+    for (index, (raw_machine, machine)) in
+        profiles.iter().zip(normalized_profiles.iter()).enumerate()
     {
         let entry_label = format!("Entry {}", index + 1);
         let machine_label = if machine.name.is_empty() {
@@ -248,11 +257,7 @@ pub fn validate_machine_profiles(profiles: &[MachineProfile]) -> MachineProfiles
             }
 
             let candidate = trimmed.trim_start_matches('.');
-            if candidate.is_empty()
-                || !candidate
-                    .chars()
-                    .all(|ch| ch.is_ascii_alphanumeric())
-            {
+            if candidate.is_empty() || !candidate.chars().all(|ch| ch.is_ascii_alphanumeric()) {
                 errors.push(format!(
                     "{}: invalid extension '{}'. Use values like .nc or .tap.",
                     machine_label, trimmed
@@ -378,7 +383,7 @@ pub fn normalize_machine_profiles(profiles: &[MachineProfile]) -> Vec<MachinePro
 fn normalize_machine_profile(mut profile: MachineProfile) -> MachineProfile {
     profile.id = profile.id.trim().to_string();
     profile.name = profile.name.trim().to_string();
-    profile.path = profile.path.trim().to_string();
+    profile.path = normalize_machine_path(&profile.path);
     profile.notes = profile.notes.trim().to_string();
     profile.allowed_extensions = normalize_allowed_extensions(&profile.allowed_extensions);
     profile
@@ -672,7 +677,7 @@ mod tests {
         assert!(warnings.is_empty());
         assert_eq!(saved.machines[0].id, "haas-1");
         assert_eq!(saved.machines[0].name, "HAAS 1");
-        assert_eq!(saved.machines[0].path, "Z:/Programs");
+        assert_eq!(saved.machines[0].path, r"Z:\Programs");
         assert_eq!(saved.machines[0].allowed_extensions, vec![".nc", ".pdf"]);
         assert_eq!(saved.machines[0].notes, "Main machine");
 
@@ -700,5 +705,20 @@ mod tests {
 
         let _ = std::fs::remove_file(&nested);
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn validate_normalizes_drive_root_without_separator() {
+        let validation = validate_machine_profiles(&[MachineProfile {
+            id: "mapped".into(),
+            name: "Mapped".into(),
+            path: "Z:".into(),
+            location_type: LocationType::NetworkShare,
+            allowed_extensions: vec![".nc".into()],
+            protected: false,
+            notes: String::new(),
+        }]);
+
+        assert_eq!(validation.profiles[0].path, r"Z:\");
     }
 }

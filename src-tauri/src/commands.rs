@@ -5,9 +5,10 @@ use crate::config::{
     save_machine_profiles, validate_config, validate_machine_profiles,
 };
 use crate::models::{
-    AppConfig, AvailabilityStatus, BrowserEntry, MachineProfile, MachineProfilesValidation,
-    PreviewData, TransferFileResult,
+    AppConfig, AvailabilityStatus, BrowserEntry, DeleteEntriesResult, MachineProfile,
+    MachineProfilesValidation, PreviewData, TransferFileResult,
 };
+use crate::path_guard::{path_is_within_root, paths_refer_to_same_location};
 use crate::preview::{get_preview, open_in_default_app};
 use crate::send::transfer_file;
 
@@ -99,31 +100,45 @@ pub fn cmd_get_preview(path: String, max_bytes: Option<u64>) -> Result<PreviewDa
 /// Delete a single file or directory entry. Requires user confirmation on the
 /// frontend — this command performs the deletion without further prompts.
 #[tauri::command]
-pub fn cmd_delete_entry(path: String) -> Result<(), String> {
-    delete_entry_at_path(&path)
+pub fn cmd_delete_entry(path: String, machine_root: String) -> Result<(), String> {
+    delete_entry_at_path(&path, &machine_root)
 }
 
 /// Delete all contents of a directory without deleting the directory itself.
 #[tauri::command]
-pub fn cmd_delete_directory_contents(path: String) -> Result<usize, String> {
-    delete_directory_contents_at_path(&path)
+pub fn cmd_delete_directory_contents(path: String, machine_root: String) -> Result<usize, String> {
+    delete_directory_contents_at_path(&path, &machine_root)
 }
 
 /// Batch delete multiple entries. Returns summary of deleted/skipped/failed counts.
 #[tauri::command]
-pub fn cmd_delete_entries(paths: Vec<String>) -> Result<(usize, usize, usize), String> {
+pub fn cmd_delete_entries(
+    paths: Vec<String>,
+    machine_root: String,
+) -> Result<DeleteEntriesResult, String> {
     let mut deleted = 0usize;
-    let mut skipped = 0usize;
+    let skipped = 0usize;
     let mut failed = 0usize;
+    let mut first_error: Option<String> = None;
 
     for path in paths {
-        match delete_entry_at_path(&path) {
+        match delete_entry_at_path(&path, &machine_root) {
             Ok(_) => deleted += 1,
-            Err(_) => failed += 1,
+            Err(error) => {
+                failed += 1;
+                if first_error.is_none() {
+                    first_error = Some(error);
+                }
+            }
         }
     }
 
-    Ok((deleted, skipped, failed))
+    Ok(DeleteEntriesResult {
+        deleted,
+        skipped,
+        failed,
+        first_error,
+    })
 }
 
 /// Open a file or directory in the OS default application (Explorer, PDF viewer, etc.)
@@ -154,7 +169,7 @@ pub async fn cmd_transfer_file(
 
 #[cfg(test)]
 mod tests {
-    use super::{cmd_delete_directory_contents, cmd_delete_entry};
+    use super::{cmd_delete_directory_contents, cmd_delete_entry, delete_entry_at_path};
     use std::path::PathBuf;
 
     #[test]
@@ -177,7 +192,11 @@ mod tests {
         let file = root.join("program.nc");
         std::fs::write(&file, "G0 X0 Y0").unwrap();
 
-        cmd_delete_entry(file.to_string_lossy().to_string()).unwrap();
+        cmd_delete_entry(
+            file.to_string_lossy().to_string(),
+            root.to_string_lossy().to_string(),
+        )
+        .unwrap();
 
         assert!(!file.exists());
         let _ = std::fs::remove_dir_all(root);
@@ -190,7 +209,11 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("nested.txt"), "test").unwrap();
 
-        cmd_delete_entry(dir.to_string_lossy().to_string()).unwrap();
+        cmd_delete_entry(
+            dir.to_string_lossy().to_string(),
+            root.to_string_lossy().to_string(),
+        )
+        .unwrap();
 
         assert!(!dir.exists());
         let _ = std::fs::remove_dir_all(root);
@@ -203,11 +226,49 @@ mod tests {
         std::fs::write(root.join("program.nc"), "G0 X0").unwrap();
         std::fs::write(root.join("nested").join("note.txt"), "note").unwrap();
 
-        let deleted = cmd_delete_directory_contents(root.to_string_lossy().to_string()).unwrap();
+        let deleted = cmd_delete_directory_contents(
+            root.to_string_lossy().to_string(),
+            root.to_string_lossy().to_string(),
+        )
+        .unwrap();
 
         assert_eq!(deleted, 2);
         assert!(root.exists());
         assert_eq!(std::fs::read_dir(&root).unwrap().count(), 0);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn delete_entry_rejects_path_outside_machine_root() {
+        let root = unique_temp_dir("delete-entry-root");
+        let outside_root = unique_temp_dir("delete-entry-outside");
+        let outside_file = outside_root.join("program.nc");
+
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(&outside_root).unwrap();
+        std::fs::write(&outside_file, "G0 X0").unwrap();
+
+        let error = delete_entry_at_path(&outside_file.to_string_lossy(), &root.to_string_lossy())
+            .unwrap_err();
+
+        assert!(error.contains("selected machine location"));
+        assert!(outside_file.exists());
+
+        let _ = std::fs::remove_dir_all(root);
+        let _ = std::fs::remove_dir_all(outside_root);
+    }
+
+    #[test]
+    fn delete_entry_rejects_machine_root_itself() {
+        let root = unique_temp_dir("delete-entry-root-self");
+        std::fs::create_dir_all(&root).unwrap();
+
+        let error =
+            delete_entry_at_path(&root.to_string_lossy(), &root.to_string_lossy()).unwrap_err();
+
+        assert!(error.contains("machine location itself"));
+        assert!(root.exists());
+
         let _ = std::fs::remove_dir_all(root);
     }
 
@@ -222,52 +283,276 @@ mod tests {
     }
 }
 
-fn delete_entry_at_path(path: &str) -> Result<(), String> {
+fn delete_entry_at_path(path: &str, machine_root: &str) -> Result<(), String> {
     use std::path::Path;
 
-    let entry_path = Path::new(path);
+    let normalized_entry_path = crate::path_guard::normalize_machine_path(path);
+    let normalized_machine_root = crate::path_guard::normalize_machine_path(machine_root);
+    let entry_path = Path::new(&normalized_entry_path);
+
+    log_delete_event(
+        "delete_entry",
+        "request",
+        path,
+        &normalized_entry_path,
+        machine_root,
+        &normalized_machine_root,
+        None,
+    );
 
     if !entry_path.exists() {
-        return Err(format!("Path does not exist: {path}"));
+        let error = format!("Path does not exist: {normalized_entry_path}");
+        log_delete_event(
+            "delete_entry",
+            "missing",
+            path,
+            &normalized_entry_path,
+            machine_root,
+            &normalized_machine_root,
+            Some(&error),
+        );
+        return Err(error);
+    }
+
+    let within_root = path_is_within_root(&normalized_machine_root, entry_path)?;
+    log_delete_event(
+        "delete_entry",
+        "guard",
+        path,
+        &normalized_entry_path,
+        machine_root,
+        &normalized_machine_root,
+        Some(if within_root { "accepted" } else { "rejected" }),
+    );
+    if !within_root {
+        let error = format!(
+            "Delete path must stay inside the selected machine location: {normalized_entry_path}"
+        );
+        log_delete_event(
+            "delete_entry",
+            "guard_rejected",
+            path,
+            &normalized_entry_path,
+            machine_root,
+            &normalized_machine_root,
+            Some(&error),
+        );
+        return Err(error);
+    }
+
+    if paths_refer_to_same_location(&normalized_machine_root, entry_path)? {
+        let error = "Cannot delete the selected machine location itself.".to_string();
+        log_delete_event(
+            "delete_entry",
+            "same_as_root",
+            path,
+            &normalized_entry_path,
+            machine_root,
+            &normalized_machine_root,
+            Some(&error),
+        );
+        return Err(error);
     }
 
     if entry_path.is_dir() {
-        std::fs::remove_dir_all(entry_path).map_err(|e| format!("Delete failed: {e}"))?;
+        log_delete_event(
+            "delete_entry",
+            "remove_dir_all",
+            path,
+            &normalized_entry_path,
+            machine_root,
+            &normalized_machine_root,
+            None,
+        );
+        std::fs::remove_dir_all(entry_path).map_err(|e| {
+            let error = format!("Delete failed: {e}");
+            log_delete_event(
+                "delete_entry",
+                "remove_dir_all_error",
+                path,
+                &normalized_entry_path,
+                machine_root,
+                &normalized_machine_root,
+                Some(&error),
+            );
+            error
+        })?;
     } else {
-        std::fs::remove_file(entry_path).map_err(|e| format!("Delete failed: {e}"))?;
+        log_delete_event(
+            "delete_entry",
+            "remove_file",
+            path,
+            &normalized_entry_path,
+            machine_root,
+            &normalized_machine_root,
+            None,
+        );
+        std::fs::remove_file(entry_path).map_err(|e| {
+            let error = format!("Delete failed: {e}");
+            log_delete_event(
+                "delete_entry",
+                "remove_file_error",
+                path,
+                &normalized_entry_path,
+                machine_root,
+                &normalized_machine_root,
+                Some(&error),
+            );
+            error
+        })?;
     }
 
+    log_delete_event(
+        "delete_entry",
+        "success",
+        path,
+        &normalized_entry_path,
+        machine_root,
+        &normalized_machine_root,
+        None,
+    );
     Ok(())
 }
 
-fn delete_directory_contents_at_path(path: &str) -> Result<usize, String> {
+fn delete_directory_contents_at_path(path: &str, machine_root: &str) -> Result<usize, String> {
     use std::path::Path;
 
-    let dir_path = Path::new(path);
+    let normalized_dir_path = crate::path_guard::normalize_machine_path(path);
+    let normalized_machine_root = crate::path_guard::normalize_machine_path(machine_root);
+    let dir_path = Path::new(&normalized_dir_path);
+
+    log_delete_event(
+        "delete_all",
+        "request",
+        path,
+        &normalized_dir_path,
+        machine_root,
+        &normalized_machine_root,
+        None,
+    );
 
     if !dir_path.exists() {
-        return Err(format!("Directory does not exist: {path}"));
+        let error = format!("Directory does not exist: {normalized_dir_path}");
+        log_delete_event(
+            "delete_all",
+            "missing",
+            path,
+            &normalized_dir_path,
+            machine_root,
+            &normalized_machine_root,
+            Some(&error),
+        );
+        return Err(error);
     }
     if !dir_path.is_dir() {
-        return Err(format!("Not a directory: {path}"));
+        let error = format!("Not a directory: {normalized_dir_path}");
+        log_delete_event(
+            "delete_all",
+            "not_directory",
+            path,
+            &normalized_dir_path,
+            machine_root,
+            &normalized_machine_root,
+            Some(&error),
+        );
+        return Err(error);
+    }
+
+    let within_root = path_is_within_root(&normalized_machine_root, dir_path)?;
+    log_delete_event(
+        "delete_all",
+        "guard",
+        path,
+        &normalized_dir_path,
+        machine_root,
+        &normalized_machine_root,
+        Some(if within_root { "accepted" } else { "rejected" }),
+    );
+    if !within_root {
+        let error = format!(
+            "Folder to clear must stay inside the selected machine location: {normalized_dir_path}"
+        );
+        log_delete_event(
+            "delete_all",
+            "guard_rejected",
+            path,
+            &normalized_dir_path,
+            machine_root,
+            &normalized_machine_root,
+            Some(&error),
+        );
+        return Err(error);
     }
 
     let mut deleted_count = 0usize;
 
     for entry_result in std::fs::read_dir(dir_path)
-        .map_err(|e| format!("Cannot read directory '{path}': {e}"))?
+        .map_err(|e| format!("Cannot read directory '{normalized_dir_path}': {e}"))?
     {
         let entry = entry_result.map_err(|e| format!("Cannot read directory entry: {e}"))?;
         let child_path = entry.path();
         if child_path.is_dir() {
-            std::fs::remove_dir_all(&child_path).map_err(|e| format!("Delete failed: {e}"))?;
+            std::fs::remove_dir_all(&child_path).map_err(|e| {
+                let error = format!("Delete failed: {e}");
+                log_delete_event(
+                    "delete_all",
+                    "remove_dir_all_error",
+                    path,
+                    &normalized_dir_path,
+                    machine_root,
+                    &normalized_machine_root,
+                    Some(&error),
+                );
+                error
+            })?;
         } else {
-            std::fs::remove_file(&child_path).map_err(|e| format!("Delete failed: {e}"))?;
+            std::fs::remove_file(&child_path).map_err(|e| {
+                let error = format!("Delete failed: {e}");
+                log_delete_event(
+                    "delete_all",
+                    "remove_file_error",
+                    path,
+                    &normalized_dir_path,
+                    machine_root,
+                    &normalized_machine_root,
+                    Some(&error),
+                );
+                error
+            })?;
         }
         deleted_count += 1;
     }
 
+    let success_detail = format!("deleted_count={deleted_count}");
+    log_delete_event(
+        "delete_all",
+        "success",
+        path,
+        &normalized_dir_path,
+        machine_root,
+        &normalized_machine_root,
+        Some(&success_detail),
+    );
     Ok(deleted_count)
+}
+
+fn log_delete_event(
+    operation: &str,
+    stage: &str,
+    raw_path: &str,
+    normalized_path: &str,
+    raw_root: &str,
+    normalized_root: &str,
+    detail: Option<&str>,
+) {
+    match detail {
+        Some(detail) => eprintln!(
+            "[haas-delete] op={operation} stage={stage} raw_path={raw_path:?} path={normalized_path:?} raw_root={raw_root:?} root={normalized_root:?} detail={detail}"
+        ),
+        None => eprintln!(
+            "[haas-delete] op={operation} stage={stage} raw_path={raw_path:?} path={normalized_path:?} raw_root={raw_root:?} root={normalized_root:?}"
+        ),
+    }
 }
 
 /// Check whether a path points to a directory (folder) or a file.

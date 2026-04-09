@@ -119,9 +119,13 @@ const SPLITTER_STORAGE_KEYS = {
 } as const;
 
 function buildPath(base: string, crumbs: string[]): string {
-  let path = base.replace(/\\/g, "/").replace(/\/$/, "");
+  const separator =
+    /^[A-Za-z]:/.test(base) || base.startsWith("\\\\") || base.startsWith("//")
+      ? "\\"
+      : "/";
+  let path = base.replace(/[\\/]+$/, "");
   for (const crumb of crumbs) {
-    path = `${path}/${crumb}`;
+    path = `${path}${separator}${crumb}`;
   }
   return path;
 }
@@ -218,6 +222,12 @@ function getSelectedMachineEntries(): BrowserEntry[] {
 
   const single = state.get("selected_machine_entry");
   return single ? [single] : [];
+}
+
+function isEntrySelected(pane: PaneKind, path: string): boolean {
+  const selected =
+    pane === "machine" ? getSelectedMachineEntries() : getSelectedLocalEntries();
+  return selected.some((entry) => entry.path === path);
 }
 
 function orderedLocalEntriesFromPaths(paths: Set<string>): BrowserEntry[] {
@@ -941,19 +951,8 @@ function setMachineSelection(
   updateTransferButtons();
 }
 
-function selectMachineEntry(entry: BrowserEntry, row: HTMLLIElement): void {
-  clearPaneSelection("machine");
-  row.classList.add("entry-selected");
-  clearPaneSelectionVisual("local");
-
-  state.patch({
-    selected_machine_entry: entry,
-    selected_local_entry: null,
-    selected_local_entries: [],
-    active_selection: { pane: "machine", entry },
-  });
-  localSelectionAnchorPath = null;
-  updateTransferButtons();
+function selectMachineEntry(entry: BrowserEntry, _row: HTMLLIElement): void {
+  setMachineSelection([entry], entry);
 }
 
 function handleLocalEntryClick(
@@ -1139,12 +1138,12 @@ async function handleContextMenuDelete(): Promise<void> {
   hideContextMenu();
   if (!target) return;
 
-  const { pane, entry } = target;
+  const { pane } = target;
   if (pane !== "machine") {
     return;
   }
 
-  await confirmAndDeleteMachineEntry(entry);
+  await confirmAndDeleteSelectedMachineEntries();
 }
 
 async function handleContextMenuEdit(): Promise<void> {
@@ -1186,10 +1185,12 @@ function bindAppContextMenu(): void {
       return;
     }
 
-    if (pane === "local") {
-      setLocalSelection([entry], entry);
-    } else {
-      selectMachineEntry(entry, row);
+    if (!isEntrySelected(pane, entry.path)) {
+      if (pane === "local") {
+        setLocalSelection([entry], entry);
+      } else {
+        setMachineSelection([entry], entry);
+      }
     }
     showContextMenu(event.clientX, event.clientY, pane, entry);
   };
@@ -1793,65 +1794,85 @@ async function applyTransferResult(
   }
 }
 
-export async function confirmAndDeleteMachineEntry(
-  entryOverride?: BrowserEntry | null
-): Promise<void> {
+function getMachineEntriesPendingDeletion(): BrowserEntry[] {
+  const selectedEntries = getSelectedMachineEntries();
+  if (selectedEntries.length > 0) {
+    return selectedEntries;
+  }
+
+  const singleEntry = state.get("selected_machine_entry");
+  return singleEntry ? [singleEntry] : [];
+}
+
+function buildMachineDeleteConfirmMessage(entriesToDelete: BrowserEntry[]): string {
+  if (entriesToDelete.length === 1) {
+    return t("preview.deleteConfirm", { name: entriesToDelete[0].name });
+  }
+
+  const maxNamesToShow = 5;
+  const namesList = entriesToDelete
+    .slice(0, maxNamesToShow)
+    .map((entry) => `  - ${entry.name}`)
+    .join("\n");
+  const moreCount = entriesToDelete.length - maxNamesToShow;
+  const moreText =
+    moreCount > 0
+      ? `\n${t("machine.deleteSelectedMore", {
+          count: String(moreCount),
+        })}`
+      : "";
+
+  return t("machine.deleteSelectedConfirm", {
+    count: String(entriesToDelete.length),
+    names: namesList + moreText,
+  });
+}
+
+export async function confirmAndDeleteSelectedMachineEntries(): Promise<void> {
   const machine = state.get("selected_machine");
 
   if (!machine || machine.protected) {
     return;
   }
 
-  // Determine target entries: explicit override, multi-selection, or single selection
-  const selectedEntries = getSelectedMachineEntries();
-  const entriesToDelete: BrowserEntry[] = entryOverride
-    ? [entryOverride]
-    : selectedEntries.length > 0
-      ? selectedEntries
-      : state.get("selected_machine_entry")
-        ? [state.get("selected_machine_entry")!]
-        : [];
+  const entriesToDelete = getMachineEntriesPendingDeletion();
 
   if (entriesToDelete.length === 0) {
     return;
   }
 
-  // Build confirmation message based on count
-  let confirmMessage: string;
-  if (entriesToDelete.length === 1) {
-    confirmMessage = t("preview.deleteConfirm", { name: entriesToDelete[0].name });
-  } else {
-    const maxNamesToShow = 5;
-    const namesList = entriesToDelete.slice(0, maxNamesToShow).map((e) => `  - ${e.name}`).join("\n");
-    const moreCount = entriesToDelete.length - maxNamesToShow;
-    const moreText = moreCount > 0 ? `\n  ... i još ${moreCount} stavki` : "";
-    confirmMessage = t("machine.deleteSelectedConfirm", {
-      count: String(entriesToDelete.length),
-      names: namesList + moreText,
-    });
-  }
-
-  const confirmed = await tauriConfirm(confirmMessage, { title: "HAAS CNC Connect", kind: "warning" });
+  const confirmed = await tauriConfirm(
+    buildMachineDeleteConfirmMessage(entriesToDelete),
+    { title: "HAAS CNC Connect", kind: "warning" }
+  );
   if (!confirmed) {
     return;
   }
 
-  // Perform deletion
   try {
     if (entriesToDelete.length === 1) {
-      await deleteEntry(entriesToDelete[0].path);
+      await deleteEntry(entriesToDelete[0].path, machine.path);
       setStatus(t("preview.deleted", { name: entriesToDelete[0].name }), 4000);
     } else {
       const paths = entriesToDelete.map((e) => e.path);
-      const [deleted, skipped, failed] = await deleteEntries(paths);
-      setStatus(
-        t("machine.deleteSelectedDone", {
-          deleted: String(deleted),
-          skipped: String(skipped),
-          failed: String(failed),
-        }),
-        5000
-      );
+      const result = await deleteEntries(paths, machine.path);
+      if (result.failed > 0 && result.deleted === 0 && result.first_error) {
+        setStatus(t("preview.deleteError", { error: result.first_error }));
+      } else {
+        const summary = t("machine.deleteSelectedDone", {
+          deleted: String(result.deleted),
+          skipped: String(result.skipped),
+          failed: String(result.failed),
+        });
+        const statusMessage =
+          result.failed > 0 && result.first_error
+            ? t("machine.deleteSelectedDoneWithError", {
+                summary,
+                error: result.first_error,
+              })
+            : summary;
+        setStatus(statusMessage, 5000);
+      }
     }
     clearMachineSelectionAfterDelete();
     await refreshMachineDirectory();
@@ -1881,7 +1902,7 @@ async function deleteAllMachineFolderContents(): Promise<void> {
   }
 
   try {
-    const deletedCount = await deleteDirectoryContents(currentPath);
+    const deletedCount = await deleteDirectoryContents(currentPath, machine.path);
     clearMachineSelectionAfterDelete();
     setStatus(
       t("machine.deleteAllDone", {
@@ -2103,7 +2124,7 @@ export function initFileBrowser(): void {
     void runTransfer("to_local");
   });
   deleteMachineEntryButton().addEventListener("click", () => {
-    void confirmAndDeleteMachineEntry();
+    void confirmAndDeleteSelectedMachineEntries();
   });
   deleteMachineFolderContentsButton().addEventListener("click", () => {
     void deleteAllMachineFolderContents();

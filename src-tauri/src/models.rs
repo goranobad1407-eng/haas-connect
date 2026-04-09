@@ -136,6 +136,15 @@ pub struct TransferFileResult {
     pub skipped_count: Option<usize>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeleteEntriesResult {
+    pub deleted: usize,
+    pub skipped: usize,
+    pub failed: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub first_error: Option<String>,
+}
+
 /// Full application config stored in machines.json.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {

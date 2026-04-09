@@ -6,6 +6,7 @@ import type {
   AppConfig,
   AvailabilityStatus,
   BrowserEntry,
+  DeleteEntriesResult,
   MachineProfile,
   MachineProfilesValidation,
   PreviewData,
@@ -88,19 +89,31 @@ export async function getPreview(
   return invoke<PreviewData>("cmd_get_preview", { path, maxBytes });
 }
 
-/** Delete a single file or directory entry. Confirmation must happen in the UI first. */
-export async function deleteEntry(path: string): Promise<void> {
-  return invoke<void>("cmd_delete_entry", { path });
+/** Delete a single machine entry. Confirmation must happen in the UI first. */
+export async function deleteEntry(
+  path: string,
+  machineRoot: string
+): Promise<void> {
+  return invoke<void>("cmd_delete_entry", { path, machineRoot });
 }
 
 /** Batch delete multiple entries. Returns [deleted, skipped, failed] counts. */
-export async function deleteEntries(paths: string[]): Promise<[number, number, number]> {
-  return invoke<[number, number, number]>("cmd_delete_entries", { paths });
+export async function deleteEntries(
+  paths: string[],
+  machineRoot: string
+): Promise<DeleteEntriesResult> {
+  return invoke<DeleteEntriesResult>("cmd_delete_entries", {
+    paths,
+    machineRoot,
+  });
 }
 
 /** Delete all contents of a directory without deleting the directory itself. */
-export async function deleteDirectoryContents(path: string): Promise<number> {
-  return invoke<number>("cmd_delete_directory_contents", { path });
+export async function deleteDirectoryContents(
+  path: string,
+  machineRoot: string
+): Promise<number> {
+  return invoke<number>("cmd_delete_directory_contents", { path, machineRoot });
 }
 
 /** Open a file or directory in the OS default application. */

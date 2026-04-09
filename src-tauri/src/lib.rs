@@ -3,6 +3,7 @@ pub mod browser;
 pub mod commands;
 pub mod config;
 pub mod models;
+pub mod path_guard;
 pub mod preview;
 pub mod send;
 

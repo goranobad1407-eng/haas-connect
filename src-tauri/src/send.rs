@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 
 use crate::availability::check_path_availability;
 use crate::models::{AvailabilityStatus, TransferFileResult, TransferFileStatus};
+use crate::path_guard::path_is_within_root;
 
 pub async fn transfer_file(
     source_path: String,
@@ -233,8 +234,12 @@ pub async fn transfer_file(
                 allowed_ext_for_copy.as_deref(),
             )
         } else {
-            copy_single_file(&source_for_copy, &destination_for_copy, overwrite)
-                .map(|_| CopyDirectoryStats { copied: 1, skipped_disallowed: 0 })
+            copy_single_file(&source_for_copy, &destination_for_copy, overwrite).map(|_| {
+                CopyDirectoryStats {
+                    copied: 1,
+                    skipped_disallowed: 0,
+                }
+            })
         }
     })
     .await;
@@ -341,7 +346,10 @@ fn copy_directory_tree(
 
     std::fs::create_dir_all(destination)?;
 
-    let mut stats = CopyDirectoryStats { copied: 0, skipped_disallowed: 0 };
+    let mut stats = CopyDirectoryStats {
+        copied: 0,
+        skipped_disallowed: 0,
+    };
 
     for entry in std::fs::read_dir(source)? {
         let entry = entry?;
@@ -349,7 +357,12 @@ fn copy_directory_tree(
         let destination_path = destination.join(entry.file_name());
 
         if source_path.is_dir() {
-            let sub = copy_directory_tree(&source_path, &destination_path, overwrite, allowed_extensions)?;
+            let sub = copy_directory_tree(
+                &source_path,
+                &destination_path,
+                overwrite,
+                allowed_extensions,
+            )?;
             stats.copied += sub.copied;
             stats.skipped_disallowed += sub.skipped_disallowed;
         } else if source_path.is_file() {
@@ -388,7 +401,10 @@ fn copy_single_file(source: &Path, destination: &Path, overwrite: bool) -> std::
         } else {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::AlreadyExists,
-                format!("Destination file '{}' already exists.", destination.to_string_lossy()),
+                format!(
+                    "Destination file '{}' already exists.",
+                    destination.to_string_lossy()
+                ),
             ));
         }
     }
@@ -398,7 +414,9 @@ fn copy_single_file(source: &Path, destination: &Path, overwrite: bool) -> std::
 
 fn destination_offline_message(status: AvailabilityStatus) -> String {
     match status {
-        AvailabilityStatus::Timeout => "Destination folder did not respond within the timeout.".into(),
+        AvailabilityStatus::Timeout => {
+            "Destination folder did not respond within the timeout.".into()
+        }
         AvailabilityStatus::Offline => "Destination folder is offline or unreachable.".into(),
         AvailabilityStatus::Error => "Destination folder check failed.".into(),
         AvailabilityStatus::Checking => "Destination folder is still being checked.".into(),
@@ -407,20 +425,8 @@ fn destination_offline_message(status: AvailabilityStatus) -> String {
     }
 }
 
-fn ensure_destination_is_within_root(
-    root: &str,
-    destination_dir: &Path,
-) -> Result<bool, String> {
-    let canonical_root = std::fs::canonicalize(root)
-        .map_err(|error| format!("Could not resolve destination root '{}': {error}", root))?;
-    let canonical_destination = std::fs::canonicalize(destination_dir).map_err(|error| {
-        format!(
-            "Could not resolve destination folder '{}': {error}",
-            destination_dir.to_string_lossy()
-        )
-    })?;
-
-    Ok(canonical_destination.starts_with(&canonical_root))
+fn ensure_destination_is_within_root(root: &str, destination_dir: &Path) -> Result<bool, String> {
+    path_is_within_root(root, destination_dir)
 }
 
 fn result(
@@ -700,7 +706,10 @@ mod tests {
 
         assert_eq!(result.status, TransferFileStatus::OverwriteRequired);
         assert!(result.is_directory);
-        assert_eq!(std::fs::read_to_string(existing.join("program.nc")).unwrap(), "old");
+        assert_eq!(
+            std::fs::read_to_string(existing.join("program.nc")).unwrap(),
+            "old"
+        );
 
         let _ = std::fs::remove_dir_all(root);
         let _ = std::fs::remove_dir_all(source_dir);
@@ -733,9 +742,18 @@ mod tests {
         .await;
 
         assert_eq!(result.status, TransferFileStatus::Success);
-        assert_eq!(std::fs::read_to_string(existing.join("program.nc")).unwrap(), "new");
-        assert_eq!(std::fs::read_to_string(existing_nested.join("setup.txt")).unwrap(), "fresh");
-        assert_eq!(std::fs::read_to_string(existing_nested.join("keep.txt")).unwrap(), "keep");
+        assert_eq!(
+            std::fs::read_to_string(existing.join("program.nc")).unwrap(),
+            "new"
+        );
+        assert_eq!(
+            std::fs::read_to_string(existing_nested.join("setup.txt")).unwrap(),
+            "fresh"
+        );
+        assert_eq!(
+            std::fs::read_to_string(existing_nested.join("keep.txt")).unwrap(),
+            "keep"
+        );
 
         let _ = std::fs::remove_dir_all(root);
         let _ = std::fs::remove_dir_all(source_dir);

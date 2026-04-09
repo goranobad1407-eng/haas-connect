@@ -93,6 +93,13 @@ export interface TransferFileResult {
   skipped_count?: number;
 }
 
+export interface DeleteEntriesResult {
+  deleted: number;
+  skipped: number;
+  failed: number;
+  first_error?: string;
+}
+
 // Internal app state shape — not serialised.
 
 export interface AppState {

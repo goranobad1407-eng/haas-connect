@@ -112,7 +112,9 @@ const translations: Record<Language, Dict> = {
     "machine.deleteAllError": "Delete all failed: {error}",
     "machine.deleteSelectedConfirm":
       "Delete {count} selected item(s) from the machine?\n\n{names}\n\nThis cannot be undone.",
+    "machine.deleteSelectedMore": "  ... and {count} more item(s)",
     "machine.deleteSelectedDone": "Delete finished: {deleted} deleted, {skipped} skipped, {failed} failed.",
+    "machine.deleteSelectedDoneWithError": "{summary}\nFirst error: {error}",
 
     // Transfer messages
     "transfer.copyingToMachine": "Copying '{name}' to machine folder…",
@@ -355,7 +357,9 @@ const translations: Record<Language, Dict> = {
     "machine.deleteAllError": "Brisanje svega neuspješno: {error}",
     "machine.deleteSelectedConfirm":
       "Obrisati {count} odabranih stavki sa stroja?\n\n{names}\n\nOvo se ne može poništiti.",
+    "machine.deleteSelectedMore": "  ... i još {count} stavki",
     "machine.deleteSelectedDone": "Brisanje završeno: {deleted} obrisano, {skipped} preskočeno, {failed} neuspješno.",
+    "machine.deleteSelectedDoneWithError": "{summary}\nPrva greška: {error}",
 
     // Transfer messages
     "transfer.copyingToMachine": "Kopiranje '{name}' na stroj…",

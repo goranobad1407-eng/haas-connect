@@ -5,7 +5,7 @@ import type { ActivePaneSelection, BrowserEntry, PreviewData } from "../types/in
 import { state } from "../state";
 import { getPreview, openExternal } from "../api";
 import { t } from "../translations";
-import { confirmAndDeleteMachineEntry } from "./file-browser";
+import { confirmAndDeleteSelectedMachineEntries } from "./file-browser";
 import { setStatus } from "./status-bar";
 
 const pholderEl = () => document.getElementById("preview-placeholder")!;
@@ -217,13 +217,13 @@ function renderActions(
     const delBtn = document.createElement("button");
     delBtn.className = "btn-action btn-danger";
     delBtn.textContent = t("btn.delete");
-    delBtn.addEventListener("click", () => promptDelete(entry));
+    delBtn.addEventListener("click", () => promptDelete());
     bottomEl.appendChild(delBtn);
   }
 }
 
-async function promptDelete(entry: BrowserEntry): Promise<void> {
-  await confirmAndDeleteMachineEntry(entry);
+async function promptDelete(): Promise<void> {
+  await confirmAndDeleteSelectedMachineEntries();
 }
 
 function renderMultiSelectionSummary(entries: BrowserEntry[]): void {

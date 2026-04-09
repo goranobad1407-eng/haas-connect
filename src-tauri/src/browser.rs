@@ -3,6 +3,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::UNIX_EPOCH;
 
 use crate::models::BrowserEntry;
+use crate::path_guard::normalize_machine_path;
 
 /// Previewable extensions — files the app can show inline content for.
 const PREVIEWABLE: &[&str] = &[".nc", ".tap", ".cnc", ".txt", ".pdf"];
@@ -20,18 +21,19 @@ const MAX_SEARCH_RESULTS: usize = 500;
 /// - Sorts: directories first, then files — both groups alphabetical.
 /// - Does NOT recurse. One level only.
 pub fn list_directory(path_str: &str) -> Result<Vec<BrowserEntry>, String> {
-    let path = Path::new(path_str);
+    let normalized_path = normalize_machine_path(path_str);
+    let path = Path::new(&normalized_path);
 
     if !path.exists() {
-        return Err(format!("Path does not exist: {path_str}"));
+        return Err(format!("Path does not exist: {normalized_path}"));
     }
 
     if !path.is_dir() {
-        return Err(format!("Not a directory: {path_str}"));
+        return Err(format!("Not a directory: {normalized_path}"));
     }
 
-    let read_dir =
-        std::fs::read_dir(path).map_err(|e| format!("Cannot read directory '{path_str}': {e}"))?;
+    let read_dir = std::fs::read_dir(path)
+        .map_err(|e| format!("Cannot read directory '{normalized_path}': {e}"))?;
 
     let mut entries = Vec::new();
 
@@ -47,7 +49,7 @@ pub fn list_directory(path_str: &str) -> Result<Vec<BrowserEntry>, String> {
         };
 
         let name = entry.file_name().to_string_lossy().to_string();
-        let full_path = entry.path().to_string_lossy().to_string();
+        let full_path = normalize_machine_path(&entry.path().to_string_lossy());
         let is_dir = metadata.is_dir();
         let size = if is_dir { None } else { Some(metadata.len()) };
 
@@ -222,7 +224,7 @@ pub fn search_directory_recursive(
         }
     });
 
-    // Store capped flag and total in thread-local or return via extension? 
+    // Store capped flag and total in thread-local or return via extension?
     // For now, log it; UI can infer from result count == MAX_SEARCH_RESULTS
     if capped {
         eprintln!(
@@ -292,6 +294,13 @@ pub fn format_size(bytes: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Mutex, MutexGuard};
+
+    static SEARCH_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+    fn search_test_guard() -> MutexGuard<'static, ()> {
+        SEARCH_TEST_LOCK.lock().unwrap()
+    }
 
     #[test]
     fn list_temp_dir_does_not_error() {
@@ -309,8 +318,7 @@ mod tests {
 
     #[test]
     fn recursive_search_finds_nested_folders_and_files_case_insensitively() {
-        // Reset global state to prevent interference from other tests
-        set_active_local_search_request(1);
+        let _guard = search_test_guard();
 
         let root = unique_temp_dir("recursive-search-basic");
         let nested = root.join("Jobs").join("403");
@@ -320,7 +328,10 @@ mod tests {
 
         let results =
             search_directory_recursive(root.to_string_lossy().as_ref(), "403", 1).unwrap();
-        let paths = results.iter().map(|entry| entry.path.as_str()).collect::<Vec<_>>();
+        let paths = results
+            .iter()
+            .map(|entry| entry.path.as_str())
+            .collect::<Vec<_>>();
 
         assert_eq!(results.len(), 2);
         assert!(paths.iter().any(|path| path.ends_with("403")));
@@ -337,8 +348,7 @@ mod tests {
 
     #[test]
     fn recursive_search_stays_scoped_to_requested_root() {
-        // Reset global state to prevent interference from other tests
-        set_active_local_search_request(1);
+        let _guard = search_test_guard();
 
         let base = unique_temp_dir("recursive-search-scope");
         let scoped_root = base.join("scope");
@@ -360,8 +370,7 @@ mod tests {
 
     #[test]
     fn recursive_search_uses_none_relative_path_for_direct_children() {
-        // Reset global state to prevent interference from other tests
-        set_active_local_search_request(1);
+        let _guard = search_test_guard();
 
         let root = unique_temp_dir("recursive-search-direct-child");
         std::fs::create_dir_all(&root).unwrap();
@@ -378,8 +387,7 @@ mod tests {
 
     #[test]
     fn recursive_search_returns_folders_with_correct_is_dir_flag() {
-        // Reset global state to prevent interference from other tests
-        set_active_local_search_request(1);
+        let _guard = search_test_guard();
 
         let root = unique_temp_dir("recursive-search-folder-flag");
         std::fs::create_dir_all(&root).unwrap();
@@ -411,8 +419,7 @@ mod tests {
 
     #[test]
     fn recursive_search_finds_both_files_and_folders() {
-        // Reset global state to prevent interference from other tests
-        set_active_local_search_request(1);
+        let _guard = search_test_guard();
 
         let root = unique_temp_dir("recursive-search-mixed");
         // Create structure: root/ProjectA/Jobs/job1.nc
@@ -439,8 +446,7 @@ mod tests {
 
     #[test]
     fn recursive_search_folders_appear_first_in_results() {
-        // Reset global state to prevent interference from other tests
-        set_active_local_search_request(1);
+        let _guard = search_test_guard();
 
         let root = unique_temp_dir("recursive-search-order");
         // Create folder and file with same search term
@@ -464,8 +470,7 @@ mod tests {
 
     #[test]
     fn recursive_search_is_case_insensitive() {
-        // Reset global state to prevent interference from other tests
-        set_active_local_search_request(1);
+        let _guard = search_test_guard();
 
         let root = unique_temp_dir("recursive-search-case");
         std::fs::create_dir_all(root.join("UPPERCASE")).unwrap();
@@ -476,7 +481,10 @@ mod tests {
         let results =
             search_directory_recursive(root.to_string_lossy().as_ref(), "case", 1).unwrap();
         let names: Vec<&str> = results.iter().map(|e| e.name.as_str()).collect();
-        assert!(names.contains(&"MiXeD.CaSe.NC"), "Should find mixed case file");
+        assert!(
+            names.contains(&"MiXeD.CaSe.NC"),
+            "Should find mixed case file"
+        );
 
         // Search with uppercase query
         let results2 =
@@ -491,8 +499,7 @@ mod tests {
 
     #[test]
     fn recursive_search_respects_max_results_limit() {
-        // Reset global state to prevent interference from other tests
-        set_active_local_search_request(1);
+        let _guard = search_test_guard();
 
         let root = unique_temp_dir("recursive-search-limit");
         std::fs::create_dir_all(&root).unwrap();
