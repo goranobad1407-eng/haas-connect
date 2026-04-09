@@ -56,6 +56,9 @@ pub struct BrowserEntry {
     pub name: String,
     /// Full absolute path.
     pub path: String,
+    /// Parent path relative to the current search root. None for direct children.
+    #[serde(default)]
+    pub relative_path: Option<String>,
     pub is_dir: bool,
     /// File size in bytes; None for directories.
     pub size: Option<u64>,

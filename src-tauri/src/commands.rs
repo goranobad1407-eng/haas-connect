@@ -1,5 +1,5 @@
 use crate::availability::check_path_availability;
-use crate::browser::list_directory;
+use crate::browser::{list_directory, search_directory_recursive, set_active_local_search_request};
 use crate::config::{
     default_config_write_path, load_config, load_machine_profiles, save_config,
     save_machine_profiles, validate_config, validate_machine_profiles,
@@ -70,6 +70,22 @@ pub async fn cmd_check_availability(path: String, timeout_secs: Option<u64>) -> 
 #[tauri::command]
 pub fn cmd_list_directory(path: String) -> Result<Vec<BrowserEntry>, String> {
     list_directory(&path)
+}
+
+/// Recursively search one local directory tree by entry name.
+/// Scope is limited to the requested path and its descendants.
+#[tauri::command]
+pub fn cmd_set_active_local_search_request(request_id: u64) {
+    set_active_local_search_request(request_id);
+}
+
+#[tauri::command]
+pub fn cmd_search_local_entries(
+    path: String,
+    query: String,
+    request_id: u64,
+) -> Result<Vec<BrowserEntry>, String> {
+    search_directory_recursive(&path, &query, request_id)
 }
 
 /// Get an inline preview for a file.

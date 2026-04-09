@@ -70,8 +70,11 @@ const translations: Record<Language, Dict> = {
     "pane.localEmpty":
       "Choose a local work folder to browse CNC files.",
     "pane.localLoading": "Loading local folder…",
-    "pane.localSearchPlaceholder": "Search folder or file name",
-    "pane.localNoMatches": 'No local entries match "{query}"',
+    "pane.localSearching": "Searching current folder…",
+    "pane.localSearchMinChars":
+      "Type at least {count} characters to search recursively",
+    "pane.localSearchPlaceholder": "Search current folder and subfolders",
+    "pane.localNoMatches": 'No local matches for "{query}" under the current folder',
     "pane.dirEmpty": "Directory is empty",
 
     // Preview pane
@@ -144,6 +147,7 @@ const translations: Record<Language, Dict> = {
     "status.machineLoadError": "Machine folder error: {error}",
     "status.localReady": "Local folder ready: {path}",
     "status.localError": "Local folder error: {error}",
+    "status.localSearchError": "Local search failed: {error}",
     "status.defaultLocalLoaded": "Default local folder loaded.",
     "status.defaultLocalInvalid":
       "Default local path is unavailable. Choose a folder manually.",
@@ -295,8 +299,11 @@ const translations: Record<Language, Dict> = {
     "pane.localEmpty":
       "Odaberite lokalnu radnu mapu za pregled CNC datoteka.",
     "pane.localLoading": "Učitavanje lokalne mape…",
-    "pane.localSearchPlaceholder": "Pretraži naziv mape ili datoteke",
-    "pane.localNoMatches": 'Nema lokalnih stavki za "{query}"',
+    "pane.localSearching": "Pretraga trenutne mape…",
+    "pane.localSearchMinChars":
+      "Unesite najmanje {count} znaka za rekurzivnu pretragu",
+    "pane.localSearchPlaceholder": "Pretraži trenutnu mapu i podmape",
+    "pane.localNoMatches": 'Nema rezultata za "{query}" u trenutnoj mapi',
     "pane.dirEmpty": "Mapa je prazna",
 
     // Preview pane
@@ -370,6 +377,7 @@ const translations: Record<Language, Dict> = {
     "status.machineLoadError": "Greška mape stroja: {error}",
     "status.localReady": "Lokalna mapa učitana: {path}",
     "status.localError": "Greška lokalne mape: {error}",
+    "status.localSearchError": "Greška lokalne pretrage: {error}",
     "status.defaultLocalLoaded": "Zadana lokalna mapa učitana.",
     "status.defaultLocalInvalid":
       "Zadana lokalna mapa nije dostupna. Odaberite mapu ručno.",

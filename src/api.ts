@@ -62,6 +62,24 @@ export async function listDirectory(path: string): Promise<BrowserEntry[]> {
   return invoke<BrowserEntry[]>("cmd_list_directory", { path });
 }
 
+export async function searchLocalEntries(
+  path: string,
+  query: string,
+  requestId: number
+): Promise<BrowserEntry[]> {
+  return invoke<BrowserEntry[]>("cmd_search_local_entries", {
+    path,
+    query,
+    requestId,
+  });
+}
+
+export async function setActiveLocalSearchRequest(
+  requestId: number
+): Promise<void> {
+  return invoke<void>("cmd_set_active_local_search_request", { requestId });
+}
+
 /** Get on-demand preview for a single file. */
 export async function getPreview(
   path: string,

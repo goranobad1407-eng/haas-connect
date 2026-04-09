@@ -1,6 +1,14 @@
 import { open } from "@tauri-apps/plugin-dialog";
 
-import { deleteDirectoryContents, deleteEntry, listDirectory, openExternal, transferFile } from "../api";
+import {
+  deleteDirectoryContents,
+  deleteEntry,
+  listDirectory,
+  openExternal,
+  searchLocalEntries,
+  setActiveLocalSearchRequest,
+  transferFile,
+} from "../api";
 import { state } from "../state";
 import { t, applyStaticLabels } from "../translations";
 import type {
@@ -87,12 +95,17 @@ let localNavigationHistory: LocalNavigationEntry[] = [];
 let localNavigationIndex = -1;
 let localSelectionAnchorPath: string | null = null;
 let localSearchQuery = "";
+let localSearchDebounceHandle: number | null = null;
+let localSearchRequestToken = 0;
 
 const SIDEBAR_MIN_WIDTH = 230;
 const CENTER_MIN_WIDTH = 660;
 const PREVIEW_MIN_WIDTH = 320;
 const TRANSFER_LEFT_MIN_WIDTH = 260;
 const TRANSFER_RIGHT_MIN_WIDTH = 360;
+const LOCAL_SEARCH_DEBOUNCE_MS = 320;
+const LOCAL_SEARCH_MIN_QUERY_LENGTH = 3;
+const LOCAL_SEARCH_CANCELLED_ERROR = "__local_search_cancelled__";
 const SPLITTER_STORAGE_KEYS = {
   sidebar: "haas-connect-sidebar-width",
   preview: "haas-connect-preview-width",
@@ -127,7 +140,7 @@ function showList(pane: PaneKind): void {
 function getEntries(pane: PaneKind): BrowserEntry[] {
   return pane === "machine"
     ? state.get("machine_entries")
-    : state.get("local_entries");
+    : getVisibleLocalEntries();
 }
 
 function getBreadcrumb(pane: PaneKind): string[] {
@@ -136,15 +149,43 @@ function getBreadcrumb(pane: PaneKind): string[] {
     : state.get("local_breadcrumb");
 }
 
-function getFilteredLocalEntries(entries: BrowserEntry[]): BrowserEntry[] {
-  const query = localSearchQuery.trim().toLocaleLowerCase();
-  if (!query) {
-    return entries;
+function getNormalizedLocalSearchQuery(): string {
+  return localSearchQuery.trim();
+}
+
+function isLocalSearchActive(): boolean {
+  return getNormalizedLocalSearchQuery().length > 0;
+}
+
+function shouldRunRecursiveLocalSearch(query = getNormalizedLocalSearchQuery()): boolean {
+  return query.length >= LOCAL_SEARCH_MIN_QUERY_LENGTH;
+}
+
+function isLocalSearchBelowThreshold(query = getNormalizedLocalSearchQuery()): boolean {
+  return query.length > 0 && query.length < LOCAL_SEARCH_MIN_QUERY_LENGTH;
+}
+
+function syncActiveLocalSearchRequest(): void {
+  void setActiveLocalSearchRequest(localSearchRequestToken).catch(() => undefined);
+}
+
+function bumpLocalSearchRequestToken(): number {
+  localSearchRequestToken += 1;
+  syncActiveLocalSearchRequest();
+  return localSearchRequestToken;
+}
+
+function getVisibleLocalEntries(): BrowserEntry[] {
+  if (!shouldRunRecursiveLocalSearch()) {
+    return state.get("local_entries");
   }
 
-  return entries.filter((entry) =>
-    entry.name.toLocaleLowerCase().includes(query)
-  );
+  const searchResults = state.get("local_search_results");
+  if (state.get("is_loading_local_search")) {
+    return searchResults ?? state.get("local_entries");
+  }
+
+  return searchResults ?? [];
 }
 
 function isLocalExternallyOpenable(
@@ -164,9 +205,7 @@ function getSelectedLocalEntries(): BrowserEntry[] {
 }
 
 function orderedLocalEntriesFromPaths(paths: Set<string>): BrowserEntry[] {
-  return state
-    .get("local_entries")
-    .filter((entry) => paths.has(entry.path));
+  return getVisibleLocalEntries().filter((entry) => paths.has(entry.path));
 }
 
 function resetLocalNavigationHistory(): void {
@@ -514,13 +553,14 @@ function renderEntries(pane: PaneKind, entries: BrowserEntry[]): void {
   const list = pane === "machine" ? machineListEl() : localListEl();
   list.innerHTML = "";
 
-  const visibleEntries =
-    pane === "local" ? getFilteredLocalEntries(entries) : entries;
+  const visibleEntries = pane === "local" ? getVisibleLocalEntries() : entries;
 
   if (visibleEntries.length === 0) {
     const message =
-      pane === "local" && localSearchQuery.trim()
-        ? t("pane.localNoMatches", { query: localSearchQuery.trim() })
+      pane === "local" && state.get("is_loading_local_search")
+        ? t("pane.localSearching")
+        : pane === "local" && shouldRunRecursiveLocalSearch()
+          ? t("pane.localNoMatches", { query: getNormalizedLocalSearchQuery() })
         : t("pane.dirEmpty");
     showPlaceholder(pane, message);
     return;
@@ -537,21 +577,33 @@ function buildEntryItem(pane: PaneKind, entry: BrowserEntry): HTMLLIElement {
   row.className = entry.is_dir ? "entry-dir" : "entry-file";
   row.dataset.path = entry.path;
   row.dataset.pane = pane;
+  row.title = entry.path;
 
   const icon = document.createElement("span");
   icon.className = "entry-icon";
   icon.textContent = entry.is_dir ? "📁" : fileIcon(entry.extension);
 
+  const text = document.createElement("span");
+  text.className = "entry-text";
+
   const name = document.createElement("span");
   name.className = "entry-name";
   name.textContent = entry.name;
+  text.appendChild(name);
+
+  if (pane === "local" && entry.relative_path) {
+    const subpath = document.createElement("span");
+    subpath.className = "entry-subpath";
+    subpath.textContent = entry.relative_path;
+    text.appendChild(subpath);
+  }
 
   const meta = document.createElement("span");
   meta.className = "entry-meta";
   meta.textContent =
     !entry.is_dir && entry.size !== null ? formatSize(entry.size) : "";
 
-  row.append(icon, name, meta);
+  row.append(icon, text, meta);
 
   row.addEventListener("click", (event) => {
     if (pane === "local") {
@@ -564,11 +616,11 @@ function buildEntryItem(pane: PaneKind, entry: BrowserEntry): HTMLLIElement {
 
   row.addEventListener("dblclick", () => {
     if (entry.is_dir) {
-      const nextBreadcrumb = [...getBreadcrumb(pane), entry.name];
       if (pane === "machine") {
+        const nextBreadcrumb = [...getBreadcrumb(pane), entry.name];
         void loadMachineDirectory(entry.path, nextBreadcrumb);
       } else {
-        void loadLocalDirectory(entry.path, nextBreadcrumb);
+        void openLocalDirectoryEntry(entry);
       }
       return;
     }
@@ -594,13 +646,150 @@ function updateLocalSearchInput(): void {
   localSearchInput().value = localSearchQuery;
 }
 
+function cancelScheduledLocalSearch(): void {
+  if (localSearchDebounceHandle !== null) {
+    window.clearTimeout(localSearchDebounceHandle);
+    localSearchDebounceHandle = null;
+  }
+}
+
+function clearLocalSearchState(): void {
+  state.patch({
+    local_search_results: null,
+    is_loading_local_search: false,
+  });
+}
+
 function resetLocalSearch(): void {
+  cancelScheduledLocalSearch();
+  bumpLocalSearchRequestToken();
   if (!localSearchQuery) {
+    clearLocalSearchState();
+    updateLocalPaneStatus();
     return;
   }
 
   localSearchQuery = "";
+  clearLocalSearchState();
   updateLocalSearchInput();
+  updateLocalPaneStatus();
+}
+
+function normalizePath(path: string): string {
+  return path.replace(/\\/g, "/").replace(/\/+$/, "");
+}
+
+function getLocalBreadcrumbForPath(path: string): string[] {
+  const root = state.get("local_root");
+  if (!root) {
+    return [...state.get("local_breadcrumb")];
+  }
+
+  const normalizedRoot = normalizePath(root);
+  const normalizedPath = normalizePath(path);
+  const normalizedRootLower = normalizedRoot.toLocaleLowerCase();
+  const normalizedPathLower = normalizedPath.toLocaleLowerCase();
+
+  if (normalizedPathLower === normalizedRootLower) {
+    return [];
+  }
+
+  const prefix = `${normalizedRootLower}/`;
+  if (!normalizedPathLower.startsWith(prefix)) {
+    return [...state.get("local_breadcrumb")];
+  }
+
+  const relative = normalizedPath.slice(normalizedRoot.length + 1);
+  return relative.length > 0 ? relative.split("/").filter(Boolean) : [];
+}
+
+async function executeLocalSearch(
+  path: string,
+  query: string,
+  requestToken: number
+): Promise<void> {
+  try {
+    const results = await searchLocalEntries(path, query, requestToken);
+    if (
+      requestToken !== localSearchRequestToken ||
+      state.get("local_current_path") !== path ||
+      getNormalizedLocalSearchQuery() !== query
+    ) {
+      return;
+    }
+
+    state.patch({
+      local_search_results: results,
+      is_loading_local_search: false,
+    });
+    updateLocalPaneStatus();
+    renderEntries("local", state.get("local_entries"));
+  } catch (error) {
+    if (
+      requestToken !== localSearchRequestToken ||
+      String(error).includes(LOCAL_SEARCH_CANCELLED_ERROR)
+    ) {
+      return;
+    }
+
+    state.patch({
+      local_search_results: [],
+      is_loading_local_search: false,
+    });
+    updateLocalPaneStatus();
+    showPlaceholder("local", t("status.localSearchError", { error: String(error) }));
+    setStatus(t("status.localSearchError", { error: String(error) }));
+  } finally {
+    if (requestToken === localSearchRequestToken) {
+      updateLocalPaneStatus();
+      updateTransferButtons();
+    }
+  }
+}
+
+function scheduleLocalSearch(
+  requestToken = bumpLocalSearchRequestToken(),
+  options?: { immediate?: boolean }
+): void {
+  const path = state.get("local_current_path");
+  const query = getNormalizedLocalSearchQuery();
+
+  cancelScheduledLocalSearch();
+
+  if (!path || !query) {
+    clearLocalSearchState();
+    updateLocalPaneStatus();
+    renderEntries("local", state.get("local_entries"));
+    updateTransferButtons();
+    return;
+  }
+
+  if (!shouldRunRecursiveLocalSearch(query)) {
+    clearLocalSearchState();
+    updateLocalPaneStatus();
+    renderEntries("local", state.get("local_entries"));
+    updateTransferButtons();
+    return;
+  }
+
+  const hasVisibleEntries = getVisibleLocalEntries().length > 0;
+  state.set("is_loading_local_search", true);
+  updateLocalPaneStatus();
+  if (!hasVisibleEntries) {
+    renderEntries("local", state.get("local_entries"));
+  }
+
+  const runSearch = () => {
+    localSearchDebounceHandle = null;
+    void executeLocalSearch(path, query, requestToken);
+  };
+
+  if (options?.immediate) {
+    runSearch();
+    return;
+  }
+
+  localSearchDebounceHandle = window.setTimeout(runSearch, LOCAL_SEARCH_DEBOUNCE_MS);
 }
 
 function handleLocalSearchInput(): void {
@@ -610,12 +799,22 @@ function handleLocalSearchInput(): void {
   }
 
   localSearchQuery = nextQuery;
+  const requestToken = bumpLocalSearchRequestToken();
   if (getSelectedLocalEntries().length > 0) {
     clearPaneSelection("local");
     clearPaneSelectionVisual("machine");
   }
-  renderEntries("local", state.get("local_entries"));
-  updateTransferButtons();
+  updateLocalPaneStatus();
+  scheduleLocalSearch(requestToken);
+}
+
+async function openLocalDirectoryEntry(entry: BrowserEntry): Promise<void> {
+  const breadcrumb = getLocalBreadcrumbForPath(entry.path);
+  if (isLocalSearchActive()) {
+    resetLocalSearch();
+  }
+
+  await loadLocalDirectory(entry.path, breadcrumb);
 }
 
 function setLocalSelection(
@@ -680,7 +879,7 @@ function handleLocalEntryClick(
   entry: BrowserEntry,
   event: MouseEvent
 ): void {
-  const currentEntries = state.get("local_entries");
+  const currentEntries = getVisibleLocalEntries();
   const currentSelection = new Set(
     state.get("selected_local_entries").map((item) => item.path)
   );
@@ -999,6 +1198,7 @@ export async function loadLocalDirectory(
     local_current_path: path,
     local_breadcrumb: breadcrumb,
     local_entries: [],
+    local_search_results: null,
     selected_local_entry: null,
     selected_local_entries: [],
     is_loading_local_directory: true,
@@ -1021,11 +1221,18 @@ export async function loadLocalDirectory(
     if (options?.recordHistory !== false) {
       recordLocalNavigation(path, breadcrumb);
     }
-    renderEntries("local", entries);
+    if (isLocalSearchActive()) {
+      scheduleLocalSearch(undefined, { immediate: true });
+    } else {
+      updateLocalPaneStatus();
+      renderEntries("local", entries);
+    }
     setStatus(t("status.localReady", { path }));
     return entries;
   } catch (error) {
     state.set("is_loading_local_directory", false);
+    clearLocalSearchState();
+    updateLocalPaneStatus();
     showPlaceholder("local", t("status.localError", { error: String(error) }));
     setStatus(t("status.localError", { error: String(error) }));
     return [];
@@ -1107,7 +1314,24 @@ function updateMachinePaneStatus(): void {
 
 function updateLocalPaneStatus(): void {
   const root = state.get("local_root");
-  localStatusEl().textContent = root ?? t("pane.localChooseFolder");
+  if (!root) {
+    localStatusEl().textContent = t("pane.localChooseFolder");
+    updateBreadcrumb("local");
+    return;
+  }
+
+  const query = getNormalizedLocalSearchQuery();
+  let status = root;
+
+  if (state.get("is_loading_local_search") && shouldRunRecursiveLocalSearch(query)) {
+    status = `${root} • ${t("pane.localSearching")}`;
+  } else if (isLocalSearchBelowThreshold(query)) {
+    status = `${root} • ${t("pane.localSearchMinChars", {
+      count: String(LOCAL_SEARCH_MIN_QUERY_LENGTH),
+    })}`;
+  }
+
+  localStatusEl().textContent = status;
   updateBreadcrumb("local");
 }
 
@@ -1511,9 +1735,11 @@ export function initFileBrowser(): void {
   });
   state.subscribe("machine_current_path", () => updateTransferButtons());
   state.subscribe("local_current_path", () => {
+    updateLocalPaneStatus();
     updateTransferButtons();
     updateLocalNavigationButtons();
   });
+  state.subscribe("is_loading_local_search", () => updateLocalPaneStatus());
   state.subscribe("selected_machine_entry", () => updateTransferButtons());
   state.subscribe("selected_local_entry", () => updateTransferButtons());
   state.subscribe("selected_local_entries", () => updateTransferButtons());
@@ -1540,17 +1766,12 @@ export function initFileBrowser(): void {
         showPlaceholder("machine", t("pane.machineCheckFailed"));
     }
 
-    // Refresh local pane placeholder if no files are showing.
-    const localEntries = state.get("local_entries");
     if (!state.get("local_root")) {
       showPlaceholder("local", t("pane.localEmpty"));
-    } else if (localEntries.length === 0) {
-      showPlaceholder("local", t("pane.dirEmpty"));
-    } else if (
-      localSearchQuery.trim() &&
-      getFilteredLocalEntries(localEntries).length === 0
-    ) {
-      showPlaceholder("local", t("pane.localNoMatches", { query: localSearchQuery.trim() }));
+    } else if (state.get("is_loading_local_directory")) {
+      showPlaceholder("local", t("pane.localLoading"));
+    } else {
+      renderEntries("local", state.get("local_entries"));
     }
   });
 

@@ -48,6 +48,7 @@ export interface AppConfig {
 export interface BrowserEntry {
   name: string;
   path: string;
+  relative_path: string | null;
   is_dir: boolean;
   size: number | null;
   modified: number | null; // Unix timestamp in seconds
@@ -105,12 +106,14 @@ export interface AppState {
   local_current_path: string | null;
   local_breadcrumb: string[];
   local_entries: BrowserEntry[];
+  local_search_results: BrowserEntry[] | null;
   selected_local_entry: BrowserEntry | null;
   selected_local_entries: BrowserEntry[];
   active_selection: ActivePaneSelection | null;
   preview: PreviewData | null;
   is_loading_machine_directory: boolean;
   is_loading_local_directory: boolean;
+  is_loading_local_search: boolean;
   is_checking: boolean;
   is_loading_preview: boolean;
   status_message: string;
