@@ -1,8 +1,11 @@
 import { open } from "@tauri-apps/plugin-dialog";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 
 import {
   deleteDirectoryContents,
+  deleteEntries,
   deleteEntry,
+  isDirectory,
   listDirectory,
   openExternal,
   searchLocalEntries,
@@ -77,6 +80,8 @@ const previewPanelEl = () =>
   document.getElementById("preview-panel") as HTMLElement;
 const machineBrowserSplitterEl = () =>
   document.getElementById("splitter-machine-browser") as HTMLDivElement;
+const machinePaneEl = () =>
+  document.getElementById("machine-pane") as HTMLElement;
 const transferSplitterEl = () =>
   document.getElementById("splitter-transfer") as HTMLDivElement;
 const browserPreviewSplitterEl = () =>
@@ -94,6 +99,7 @@ let contextMenuTarget: { pane: PaneKind; entry: BrowserEntry } | null = null;
 let localNavigationHistory: LocalNavigationEntry[] = [];
 let localNavigationIndex = -1;
 let localSelectionAnchorPath: string | null = null;
+let machineSelectionAnchorPath: string | null = null;
 let localSearchQuery = "";
 let localSearchDebounceHandle: number | null = null;
 let localSearchRequestToken = 0;
@@ -104,7 +110,7 @@ const PREVIEW_MIN_WIDTH = 320;
 const TRANSFER_LEFT_MIN_WIDTH = 260;
 const TRANSFER_RIGHT_MIN_WIDTH = 360;
 const LOCAL_SEARCH_DEBOUNCE_MS = 320;
-const LOCAL_SEARCH_MIN_QUERY_LENGTH = 3;
+const LOCAL_SEARCH_MIN_QUERY_LENGTH = 5;
 const LOCAL_SEARCH_CANCELLED_ERROR = "__local_search_cancelled__";
 const SPLITTER_STORAGE_KEYS = {
   sidebar: "haas-connect-sidebar-width",
@@ -204,8 +210,22 @@ function getSelectedLocalEntries(): BrowserEntry[] {
   return single ? [single] : [];
 }
 
+function getSelectedMachineEntries(): BrowserEntry[] {
+  const selected = state.get("selected_machine_entries");
+  if (selected.length > 0) {
+    return selected;
+  }
+
+  const single = state.get("selected_machine_entry");
+  return single ? [single] : [];
+}
+
 function orderedLocalEntriesFromPaths(paths: Set<string>): BrowserEntry[] {
   return getVisibleLocalEntries().filter((entry) => paths.has(entry.path));
+}
+
+function orderedMachineEntriesFromPaths(paths: Set<string>): BrowserEntry[] {
+  return getEntries("machine").filter((entry) => paths.has(entry.path));
 }
 
 function resetLocalNavigationHistory(): void {
@@ -459,13 +479,18 @@ async function openLocalEntryExternally(entry: BrowserEntry): Promise<void> {
 
 function clearPaneSelection(pane: PaneKind): void {
   const hadLocalSelections = pane === "local" && getSelectedLocalEntries().length > 0;
+  const hadMachineSelections = pane === "machine" && getSelectedMachineEntries().length > 0;
   const list = pane === "machine" ? machineListEl() : localListEl();
   for (const row of list.querySelectorAll(".entry-selected")) {
     row.classList.remove("entry-selected");
   }
 
   if (pane === "machine") {
-    state.set("selected_machine_entry", null);
+    state.patch({
+      selected_machine_entry: null,
+      selected_machine_entries: [],
+    });
+    machineSelectionAnchorPath = null;
   } else {
     state.patch({
       selected_local_entry: null,
@@ -477,7 +502,8 @@ function clearPaneSelection(pane: PaneKind): void {
   const active = state.get("active_selection");
   const shouldClearPreview =
     active?.pane === pane ||
-    hadLocalSelections;
+    hadLocalSelections ||
+    hadMachineSelections;
   if (shouldClearPreview) {
     state.patch({ active_selection: null, preview: null });
   }
@@ -611,7 +637,7 @@ function buildEntryItem(pane: PaneKind, entry: BrowserEntry): HTMLLIElement {
       return;
     }
 
-    selectMachineEntry(entry, row);
+    handleMachineEntryClick(entry, event);
   });
 
   row.addEventListener("dblclick", () => {
@@ -635,6 +661,15 @@ function buildEntryItem(pane: PaneKind, entry: BrowserEntry): HTMLLIElement {
 
 function syncLocalSelectionVisual(selectedPaths: Set<string>): void {
   for (const row of localListEl().querySelectorAll("li")) {
+    if (!(row instanceof HTMLLIElement)) {
+      continue;
+    }
+    row.classList.toggle("entry-selected", selectedPaths.has(row.dataset.path ?? ""));
+  }
+}
+
+function syncMachineSelectionVisual(selectedPaths: Set<string>): void {
+  for (const row of machineListEl().querySelectorAll("li")) {
     if (!(row instanceof HTMLLIElement)) {
       continue;
     }
@@ -860,6 +895,52 @@ function setLocalSelection(
   updateTransferButtons();
 }
 
+function setMachineSelection(
+  entries: BrowserEntry[],
+  primaryEntry?: BrowserEntry | null
+): void {
+  if (entries.length === 0) {
+    clearPaneSelection("machine");
+    clearPaneSelectionVisual("local");
+    state.set("selected_local_entry", null);
+    state.set("selected_local_entries", []);
+    updateTransferButtons();
+    return;
+  }
+
+  const paths = new Set(entries.map((entry) => entry.path));
+  const orderedEntries = orderedMachineEntriesFromPaths(paths);
+  const primary =
+    primaryEntry && paths.has(primaryEntry.path)
+      ? primaryEntry
+      : orderedEntries[orderedEntries.length - 1];
+
+  syncMachineSelectionVisual(paths);
+  clearPaneSelectionVisual("local");
+  machineSelectionAnchorPath = primary?.path ?? null;
+
+  if (orderedEntries.length === 1 && primary) {
+    state.patch({
+      selected_machine_entry: primary,
+      selected_machine_entries: orderedEntries,
+      selected_local_entry: null,
+      selected_local_entries: [],
+      active_selection: { pane: "machine", entry: primary },
+    });
+  } else {
+    state.patch({
+      selected_machine_entry: null,
+      selected_machine_entries: orderedEntries,
+      selected_local_entry: null,
+      selected_local_entries: [],
+      active_selection: null,
+      preview: null,
+    });
+  }
+
+  updateTransferButtons();
+}
+
 function selectMachineEntry(entry: BrowserEntry, row: HTMLLIElement): void {
   clearPaneSelection("machine");
   row.classList.add("entry-selected");
@@ -923,6 +1004,54 @@ function handleLocalEntryClick(
   setLocalSelection([entry], entry);
 }
 
+function handleMachineEntryClick(
+  entry: BrowserEntry,
+  event: MouseEvent
+): void {
+  const currentEntries = getEntries("machine");
+  const currentSelection = new Set(
+    state.get("selected_machine_entries").map((item) => item.path)
+  );
+
+  if (event.shiftKey) {
+    const anchorPath =
+      machineSelectionAnchorPath ?? state.get("selected_machine_entry")?.path ?? entry.path;
+    const anchorIndex = currentEntries.findIndex((item) => item.path === anchorPath);
+    const targetIndex = currentEntries.findIndex((item) => item.path === entry.path);
+
+    if (anchorIndex !== -1 && targetIndex !== -1) {
+      const [start, end] =
+        anchorIndex < targetIndex
+          ? [anchorIndex, targetIndex]
+          : [targetIndex, anchorIndex];
+      const rangeEntries = currentEntries.slice(start, end + 1);
+
+      if (event.ctrlKey || event.metaKey) {
+        for (const rangeEntry of rangeEntries) {
+          currentSelection.add(rangeEntry.path);
+        }
+        setMachineSelection(orderedMachineEntriesFromPaths(currentSelection), entry);
+      } else {
+        setMachineSelection(rangeEntries, entry);
+      }
+      return;
+    }
+  }
+
+  if (event.ctrlKey || event.metaKey) {
+    if (currentSelection.has(entry.path)) {
+      currentSelection.delete(entry.path);
+    } else {
+      currentSelection.add(entry.path);
+    }
+
+    setMachineSelection(orderedMachineEntriesFromPaths(currentSelection), entry);
+    return;
+  }
+
+  setMachineSelection([entry], entry);
+}
+
 function clearPaneSelectionVisual(pane: PaneKind): void {
   const list = pane === "machine" ? machineListEl() : localListEl();
   for (const row of list.querySelectorAll(".entry-selected")) {
@@ -936,6 +1065,7 @@ function clearMachineSelectionAfterDelete(): void {
 
   state.patch({
     selected_machine_entry: null,
+    selected_machine_entries: [],
     ...(clearMachinePreview
       ? {
           active_selection: null,
@@ -943,6 +1073,7 @@ function clearMachineSelectionAfterDelete(): void {
         }
       : {}),
   });
+  machineSelectionAnchorPath = null;
   clearPaneSelectionVisual("machine");
 }
 
@@ -1324,7 +1455,7 @@ function updateLocalPaneStatus(): void {
   let status = root;
 
   if (state.get("is_loading_local_search") && shouldRunRecursiveLocalSearch(query)) {
-    status = `${root} • ${t("pane.localSearching")}`;
+    status = `${root} • 🔍 ${t("pane.localSearching")}`;
   } else if (isLocalSearchBelowThreshold(query)) {
     status = `${root} • ${t("pane.localSearchMinChars", {
       count: String(LOCAL_SEARCH_MIN_QUERY_LENGTH),
@@ -1341,6 +1472,7 @@ function updateTransferButtons(): void {
     ? state.get("machine_statuses").get(machine.id) ?? "unknown"
     : "unknown";
   const selectedLocalEntries = getSelectedLocalEntries();
+  const selectedMachineEntries = getSelectedMachineEntries();
   const machineDeleteAllowed =
     !!machine &&
     !machine.protected &&
@@ -1357,14 +1489,14 @@ function updateTransferButtons(): void {
     !machine ||
     machineStatus !== "online" ||
     !state.get("local_current_path") ||
-    !state.get("selected_machine_entry");
+    selectedMachineEntries.length === 0;
 
   openLocalEntryButton().disabled =
     selectedLocalEntries.length !== 1 ||
     !isLocalExternallyOpenable(state.get("selected_local_entry"));
 
   deleteMachineEntryButton().disabled =
-    !machineDeleteAllowed || !state.get("selected_machine_entry");
+    !machineDeleteAllowed || selectedMachineEntries.length === 0;
   deleteMachineFolderContentsButton().disabled =
     !machineDeleteAllowed || state.get("machine_entries").length === 0;
 }
@@ -1383,9 +1515,7 @@ async function runTransfer(direction: TransferDirection): Promise<void> {
   const sourceEntries =
     direction === "to_machine"
       ? getSelectedLocalEntries()
-      : state.get("selected_machine_entry")
-        ? [state.get("selected_machine_entry")!]
-        : [];
+      : getSelectedMachineEntries();
 
   if (sourceEntries.length === 0 || !destinationDir) {
     setStatus(t("transfer.chooseFileFirst"));
@@ -1397,34 +1527,66 @@ async function runTransfer(direction: TransferDirection): Promise<void> {
     return;
   }
 
-  if (direction === "to_machine" && sourceEntries.length > 1) {
-    setStatus(
-      t("transfer.copyingBatchToMachine", {
-        count: String(sourceEntries.length),
-      })
-    );
+  if (sourceEntries.length > 1) {
+    // Batch transfer for multiple items
+    if (direction === "to_machine") {
+      setStatus(
+        t("transfer.copyingBatchToMachine", {
+          count: String(sourceEntries.length),
+        })
+      );
 
-    const summary = await transferEntriesToMachine(
-      sourceEntries,
-      destinationDir,
-      timeoutSecs,
-      machine
-    );
+      const summary = await transferEntriesToMachine(
+        sourceEntries,
+        destinationDir,
+        timeoutSecs,
+        machine
+      );
 
-    if (summary.copied > 0) {
-      await refreshMachineDirectory(
-        summary.copied === 1 ? summary.lastDestinationPath ?? undefined : undefined
+      if (summary.copied > 0) {
+        await refreshMachineDirectory(
+          summary.copied === 1 ? summary.lastDestinationPath ?? undefined : undefined
+        );
+      }
+
+      setStatus(
+        t("transfer.batchToMachineSummary", {
+          copied: String(summary.copied),
+          skipped: String(summary.skipped),
+          failed: String(summary.failed),
+        }),
+        6000
+      );
+    } else {
+      // to_local batch transfer
+      setStatus(
+        t("transfer.copyingBatchToLocal", {
+          count: String(sourceEntries.length),
+        })
+      );
+
+      const summary = await transferEntriesToLocal(
+        sourceEntries,
+        destinationDir,
+        timeoutSecs,
+        machine
+      );
+
+      if (summary.copied > 0) {
+        await refreshLocalDirectory(
+          summary.copied === 1 ? summary.lastDestinationPath ?? undefined : undefined
+        );
+      }
+
+      setStatus(
+        t("transfer.batchToLocalSummary", {
+          copied: String(summary.copied),
+          skipped: String(summary.skipped),
+          failed: String(summary.failed),
+        }),
+        6000
       );
     }
-
-    setStatus(
-      t("transfer.batchToMachineSummary", {
-        copied: String(summary.copied),
-        skipped: String(summary.skipped),
-        failed: String(summary.failed),
-      }),
-      6000
-    );
     return;
   }
 
@@ -1458,6 +1620,44 @@ async function transferEntriesToMachine(
   for (const entry of entries) {
     const result = await executeTransferEntry(
       "to_machine",
+      entry,
+      destinationDir,
+      timeoutSecs,
+      machine
+    );
+
+    if (!result) {
+      summary.skipped += 1;
+      continue;
+    }
+
+    if (result.status === "success") {
+      summary.copied += 1;
+      summary.lastDestinationPath = result.destination_path ?? summary.lastDestinationPath;
+    } else {
+      summary.failed += 1;
+    }
+  }
+
+  return summary;
+}
+
+async function transferEntriesToLocal(
+  entries: BrowserEntry[],
+  destinationDir: string,
+  timeoutSecs: number,
+  machine: MachineProfile | null
+): Promise<BatchTransferSummary> {
+  const summary: BatchTransferSummary = {
+    copied: 0,
+    skipped: 0,
+    failed: 0,
+    lastDestinationPath: null,
+  };
+
+  for (const entry of entries) {
+    const result = await executeTransferEntry(
+      "to_local",
       entry,
       destinationDir,
       timeoutSecs,
@@ -1554,11 +1754,38 @@ async function applyTransferResult(
     return;
   }
 
+  const copied = result.copied_count ?? 0;
+  const skipped = result.skipped_count ?? 0;
+  const isFolderWithStats = result.is_directory && (result.copied_count != null);
+
+  let statusMessage: string;
+  if (isFolderWithStats && copied === 0 && skipped > 0) {
+    statusMessage = t("transfer.folderNoneEligible", {
+      name: result.file_name,
+      skipped: String(skipped),
+    });
+  } else if (isFolderWithStats && skipped > 0) {
+    statusMessage = t("transfer.folderPartialSuccess", {
+      name: result.file_name,
+      copied: String(copied),
+      skipped: String(skipped),
+    });
+  } else if (isFolderWithStats) {
+    statusMessage = t("transfer.folderFullSuccess", {
+      name: result.file_name,
+      copied: String(copied),
+    });
+  } else if (direction === "to_machine") {
+    statusMessage = t("transfer.copiedToMachine", { name: result.file_name });
+  } else {
+    statusMessage = t("transfer.copiedToLocal", { name: result.file_name });
+  }
+
+  setStatus(statusMessage, 6000);
+
   if (direction === "to_machine") {
-    setStatus(t("transfer.copiedToMachine", { name: result.file_name }), 5000);
     await refreshMachineDirectory(result.destination_path ?? undefined);
   } else {
-    setStatus(t("transfer.copiedToLocal", { name: result.file_name }), 5000);
     await refreshLocalDirectory(result.destination_path ?? undefined);
   }
 }
@@ -1567,23 +1794,63 @@ export async function confirmAndDeleteMachineEntry(
   entryOverride?: BrowserEntry | null
 ): Promise<void> {
   const machine = state.get("selected_machine");
-  const entry = entryOverride ?? state.get("selected_machine_entry");
 
-  if (!machine || machine.protected || !entry) {
+  if (!machine || machine.protected) {
     return;
   }
 
-  const confirmed = window.confirm(
-    t("preview.deleteConfirm", { name: entry.name })
-  );
+  // Determine target entries: explicit override, multi-selection, or single selection
+  const selectedEntries = getSelectedMachineEntries();
+  const entriesToDelete: BrowserEntry[] = entryOverride
+    ? [entryOverride]
+    : selectedEntries.length > 0
+      ? selectedEntries
+      : state.get("selected_machine_entry")
+        ? [state.get("selected_machine_entry")!]
+        : [];
+
+  if (entriesToDelete.length === 0) {
+    return;
+  }
+
+  // Build confirmation message based on count
+  let confirmMessage: string;
+  if (entriesToDelete.length === 1) {
+    confirmMessage = t("preview.deleteConfirm", { name: entriesToDelete[0].name });
+  } else {
+    const maxNamesToShow = 5;
+    const namesList = entriesToDelete.slice(0, maxNamesToShow).map((e) => `  - ${e.name}`).join("\n");
+    const moreCount = entriesToDelete.length - maxNamesToShow;
+    const moreText = moreCount > 0 ? `\n  ... i još ${moreCount} stavki` : "";
+    confirmMessage = t("machine.deleteSelectedConfirm", {
+      count: String(entriesToDelete.length),
+      names: namesList + moreText,
+    });
+  }
+
+  const confirmed = window.confirm(confirmMessage);
   if (!confirmed) {
     return;
   }
 
+  // Perform deletion
   try {
-    await deleteEntry(entry.path);
+    if (entriesToDelete.length === 1) {
+      await deleteEntry(entriesToDelete[0].path);
+      setStatus(t("preview.deleted", { name: entriesToDelete[0].name }), 4000);
+    } else {
+      const paths = entriesToDelete.map((e) => e.path);
+      const [deleted, skipped, failed] = await deleteEntries(paths);
+      setStatus(
+        t("machine.deleteSelectedDone", {
+          deleted: String(deleted),
+          skipped: String(skipped),
+          failed: String(failed),
+        }),
+        5000
+      );
+    }
     clearMachineSelectionAfterDelete();
-    setStatus(t("preview.deleted", { name: entry.name }), 4000);
     await refreshMachineDirectory();
   } catch (error) {
     setStatus(t("preview.deleteError", { error: String(error) }));
@@ -1645,9 +1912,166 @@ function formatSize(bytes: number): string {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
+// Drag and drop state for machine pane
+let isDragOverMachinePane = false;
+
+/** Check if coordinates are within the machine pane bounds */
+function isPointInMachinePane(x: number, y: number): boolean {
+  const pane = machinePaneEl();
+  if (!pane) return false;
+  const rect = pane.getBoundingClientRect();
+  return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
+}
+
+let machinePaneOriginalPlaceholder: string | null = null;
+
+/** Update visual drag-over state on machine pane */
+function setMachinePaneDragOver(isOver: boolean): void {
+  const pane = machinePaneEl();
+  if (!pane) return;
+  isDragOverMachinePane = isOver;
+  pane.classList.toggle("drag-over", isOver);
+  if (isOver) {
+    pane.setAttribute("data-drag-message", t("pane.machineDragOver"));
+  } else {
+    pane.removeAttribute("data-drag-message");
+  }
+  const placeholder = pane.querySelector(".placeholder-text") as HTMLElement | null;
+  if (placeholder) {
+    if (isOver) {
+      // Save original text before changing
+      if (machinePaneOriginalPlaceholder === null) {
+        machinePaneOriginalPlaceholder = placeholder.textContent || "";
+      }
+      placeholder.textContent = t("pane.machineDragOver");
+    } else if (machinePaneOriginalPlaceholder !== null) {
+      // Restore original text
+      placeholder.textContent = machinePaneOriginalPlaceholder;
+      machinePaneOriginalPlaceholder = null;
+    }
+  }
+}
+
+/** Process dropped files/folders onto machine pane */
+async function handleDroppedFilesToMachine(paths: string[]): Promise<void> {
+  const machine = state.get("selected_machine");
+  const destinationDir = state.get("machine_current_path");
+  const config = state.get("config");
+
+  if (!machine || !destinationDir || !config) {
+    setStatus(t("transfer.selectMachineFirst"));
+    return;
+  }
+
+  const machineStatus = state.get("machine_statuses").get(machine.id);
+  if (machineStatus !== "online") {
+    setStatus(t("pane.machineUnavailable"));
+    return;
+  }
+
+  const timeoutSecs = config.check_timeout_secs;
+  let copied = 0;
+  let skipped = 0;
+  let failed = 0;
+  let lastDestinationPath: string | null = null;
+
+  setStatus(
+    t("transfer.copyingBatchToMachine", { count: String(paths.length) })
+  );
+
+  for (const sourcePath of paths) {
+    // Check if path is a directory
+    const pathIsDir = await isDirectory(sourcePath);
+
+    // Create a minimal BrowserEntry-like object for the transfer
+    const sourceEntry: BrowserEntry = {
+      name: sourcePath.split(/[/\\]/).pop() || "",
+      path: sourcePath,
+      relative_path: null,
+      is_dir: pathIsDir,
+      size: null,
+      modified: null,
+      extension: pathIsDir ? "" : (sourcePath.split(".").pop() || ""),
+      previewable: false,
+    };
+
+    const result = await executeTransferEntry(
+      "to_machine",
+      sourceEntry,
+      destinationDir,
+      timeoutSecs,
+      machine
+    );
+
+    if (!result) {
+      skipped += 1;
+      continue;
+    }
+
+    if (result.status === "success") {
+      copied += 1;
+      lastDestinationPath = result.destination_path ?? lastDestinationPath;
+    } else {
+      failed += 1;
+    }
+  }
+
+  if (copied > 0) {
+    await refreshMachineDirectory(
+      copied === 1 ? lastDestinationPath ?? undefined : undefined
+    );
+  }
+
+  setStatus(
+    t("transfer.batchToMachineSummary", {
+      copied: String(copied),
+      skipped: String(skipped),
+      failed: String(failed),
+    }),
+    6000
+  );
+}
+
+/** Initialize drag and drop for machine pane using Tauri native events */
+function initMachinePaneDragDrop(): void {
+  const pane = machinePaneEl();
+  if (!pane) return;
+
+  // Tauri's onDragDropEvent is the ONLY reliable source of drag lifecycle
+  // events for external file drags (Explorer → WebView) on Windows/WebView2.
+  // HTML5 document drag events do NOT fire reliably for external drags.
+  const appWindow = getCurrentWindow();
+  appWindow.onDragDropEvent((event) => {
+    const type = event.payload.type;
+
+    if (type === "enter" || type === "over") {
+      const { position } = event.payload;
+      const overMachine = isPointInMachinePane(position.x, position.y);
+      if (overMachine !== isDragOverMachinePane) {
+        setMachinePaneDragOver(overMachine);
+      }
+      return;
+    }
+
+    if (type === "leave") {
+      setMachinePaneDragOver(false);
+      return;
+    }
+
+    if (type === "drop") {
+      const { paths, position } = event.payload;
+      setMachinePaneDragOver(false);
+      if (isPointInMachinePane(position.x, position.y)) {
+        void handleDroppedFilesToMachine(paths);
+      }
+    }
+  });
+}
+
 export function initFileBrowser(): void {
   bindAppContextMenu();
   initPaneSplitters();
+  initMachinePaneDragDrop();
   updateLocalSearchInput();
 
   chooseLocalFolderButton().addEventListener("click", () => {

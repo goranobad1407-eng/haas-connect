@@ -271,6 +271,12 @@ function renderFromState(): void {
     return;
   }
 
+  const machineSelections = state.get("selected_machine_entries");
+  if (machineSelections.length > 1) {
+    renderMultiSelectionSummary(machineSelections);
+    return;
+  }
+
   const selection = state.get("active_selection");
   if (!selection) {
     previewLoadToken += 1;
@@ -329,6 +335,9 @@ export function initPreviewPane(): void {
     scheduleRenderFromState();
   });
   state.subscribe("selected_local_entries", () => {
+    scheduleRenderFromState();
+  });
+  state.subscribe("selected_machine_entries", () => {
     scheduleRenderFromState();
   });
 

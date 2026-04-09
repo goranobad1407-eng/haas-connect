@@ -68,8 +68,8 @@ pub async fn transfer_file(
         );
     }
 
-    if let Some(allowed_extensions) = allowed_extensions.as_ref() {
-        if let Err(message) = validate_allowed_extensions(&source, allowed_extensions) {
+    if let Some(ref exts) = allowed_extensions {
+        if exts.is_empty() {
             return result(
                 TransferFileStatus::InvalidExtension,
                 source_path,
@@ -77,8 +77,23 @@ pub async fn transfer_file(
                 None,
                 file_name,
                 source_is_directory,
-                message,
+                "The destination profile has no allowed extensions configured.".into(),
             );
+        }
+        // For single files, reject disallowed extensions upfront.
+        // For directories, disallowed files are skipped during copy.
+        if !source_is_directory {
+            if let Err(message) = validate_file_extension(&source, exts) {
+                return result(
+                    TransferFileStatus::InvalidExtension,
+                    source_path,
+                    destination_dir,
+                    None,
+                    file_name,
+                    source_is_directory,
+                    message,
+                );
+            }
         }
     }
 
@@ -208,29 +223,49 @@ pub async fn transfer_file(
 
     let source_for_copy = source.clone();
     let destination_for_copy = destination_path.clone();
+    let allowed_ext_for_copy = allowed_extensions;
     let copy_result = tokio::task::spawn_blocking(move || {
         if source_for_copy.is_dir() {
-            copy_directory_tree(&source_for_copy, &destination_for_copy, overwrite)
+            copy_directory_tree(
+                &source_for_copy,
+                &destination_for_copy,
+                overwrite,
+                allowed_ext_for_copy.as_deref(),
+            )
         } else {
             copy_single_file(&source_for_copy, &destination_for_copy, overwrite)
+                .map(|_| CopyDirectoryStats { copied: 1, skipped_disallowed: 0 })
         }
     })
     .await;
 
     match copy_result {
-        Ok(Ok(())) => result(
-            TransferFileStatus::Success,
-            source_path,
-            destination_dir,
-            Some(destination_path.to_string_lossy().to_string()),
-            file_name.clone(),
-            source_is_directory,
-            if source_is_directory {
+        Ok(Ok(stats)) => {
+            let message = if source_is_directory && stats.skipped_disallowed > 0 {
+                format!(
+                    "Copied folder '{}': {} file(s) copied, {} skipped (extension not allowed).",
+                    file_name, stats.copied, stats.skipped_disallowed
+                )
+            } else if source_is_directory {
                 format!("Copied folder '{}' into the destination folder.", file_name)
             } else {
                 format!("Copied '{}' into the destination folder.", file_name)
-            },
-        ),
+            };
+            let mut r = result(
+                TransferFileStatus::Success,
+                source_path,
+                destination_dir,
+                Some(destination_path.to_string_lossy().to_string()),
+                file_name,
+                source_is_directory,
+                message,
+            );
+            if source_is_directory {
+                r.copied_count = Some(stats.copied);
+                r.skipped_count = Some(stats.skipped_disallowed);
+            }
+            r
+        }
         Ok(Err(error)) => result(
             TransferFileStatus::CopyFailed,
             source_path,
@@ -252,46 +287,17 @@ pub async fn transfer_file(
     }
 }
 
-fn validate_allowed_extensions(source: &Path, allowed_extensions: &[String]) -> Result<(), String> {
-    if allowed_extensions.is_empty() {
-        return Err("The destination profile has no allowed extensions configured.".into());
-    }
-
-    if source.is_dir() {
-        validate_directory_extensions(source, allowed_extensions)
-    } else {
-        validate_file_extension(source, allowed_extensions)
-    }
+struct CopyDirectoryStats {
+    copied: usize,
+    skipped_disallowed: usize,
 }
 
-fn validate_directory_extensions(
-    directory: &Path,
-    allowed_extensions: &[String],
-) -> Result<(), String> {
-    let read_dir = std::fs::read_dir(directory).map_err(|error| {
-        format!(
-            "Could not read source folder '{}': {error}",
-            directory.to_string_lossy()
-        )
-    })?;
-
-    for entry in read_dir {
-        let entry = entry.map_err(|error| {
-            format!(
-                "Could not read an entry inside '{}': {error}",
-                directory.to_string_lossy()
-            )
-        })?;
-        let path = entry.path();
-
-        if path.is_dir() {
-            validate_directory_extensions(&path, allowed_extensions)?;
-        } else if path.is_file() {
-            validate_file_extension(&path, allowed_extensions)?;
-        }
-    }
-
-    Ok(())
+fn is_extension_allowed(file: &Path, allowed_extensions: &[String]) -> bool {
+    let extension = file
+        .extension()
+        .map(|v| format!(".{}", v.to_string_lossy().to_lowercase()))
+        .unwrap_or_default();
+    allowed_extensions.iter().any(|item| item == &extension)
 }
 
 fn validate_file_extension(file: &Path, allowed_extensions: &[String]) -> Result<(), String> {
@@ -317,7 +323,12 @@ fn validate_file_extension(file: &Path, allowed_extensions: &[String]) -> Result
     ))
 }
 
-fn copy_directory_tree(source: &Path, destination: &Path, overwrite: bool) -> std::io::Result<()> {
+fn copy_directory_tree(
+    source: &Path,
+    destination: &Path,
+    overwrite: bool,
+    allowed_extensions: Option<&[String]>,
+) -> Result<CopyDirectoryStats, std::io::Error> {
     if destination.exists() && !destination.is_dir() {
         return Err(std::io::Error::new(
             std::io::ErrorKind::AlreadyExists,
@@ -330,19 +341,30 @@ fn copy_directory_tree(source: &Path, destination: &Path, overwrite: bool) -> st
 
     std::fs::create_dir_all(destination)?;
 
+    let mut stats = CopyDirectoryStats { copied: 0, skipped_disallowed: 0 };
+
     for entry in std::fs::read_dir(source)? {
         let entry = entry?;
         let source_path = entry.path();
         let destination_path = destination.join(entry.file_name());
 
         if source_path.is_dir() {
-            copy_directory_tree(&source_path, &destination_path, overwrite)?;
+            let sub = copy_directory_tree(&source_path, &destination_path, overwrite, allowed_extensions)?;
+            stats.copied += sub.copied;
+            stats.skipped_disallowed += sub.skipped_disallowed;
         } else if source_path.is_file() {
+            if let Some(allowed) = allowed_extensions {
+                if !is_extension_allowed(&source_path, allowed) {
+                    stats.skipped_disallowed += 1;
+                    continue;
+                }
+            }
             copy_single_file(&source_path, &destination_path, overwrite)?;
+            stats.copied += 1;
         }
     }
 
-    Ok(())
+    Ok(stats)
 }
 
 fn copy_single_file(source: &Path, destination: &Path, overwrite: bool) -> std::io::Result<()> {
@@ -418,6 +440,8 @@ fn result(
         file_name,
         is_directory,
         message,
+        copied_count: None,
+        skipped_count: None,
     }
 }
 
@@ -718,7 +742,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn rejects_directory_with_disallowed_nested_file() {
+    async fn directory_with_only_disallowed_files_succeeds_with_zero_copied() {
         let root = unique_temp_dir("dir-ext-root");
         let source_dir = unique_temp_dir("dir-ext-source");
         let source_folder = source_dir.join("job");
@@ -735,8 +759,58 @@ mod tests {
         )
         .await;
 
-        assert_eq!(result.status, TransferFileStatus::InvalidExtension);
+        assert_eq!(result.status, TransferFileStatus::Success);
         assert!(result.is_directory);
+        assert_eq!(result.copied_count, Some(0));
+        assert_eq!(result.skipped_count, Some(1));
+        // program.exe should NOT be copied
+        assert!(!root.join("job").join("program.exe").exists());
+
+        let _ = std::fs::remove_dir_all(root);
+        let _ = std::fs::remove_dir_all(source_dir);
+    }
+
+    #[tokio::test]
+    async fn directory_copies_allowed_and_skips_disallowed_files() {
+        let root = unique_temp_dir("dir-mixed-root");
+        let source_dir = unique_temp_dir("dir-mixed-source");
+        let source_folder = source_dir.join("job");
+        let nested = source_folder.join("sub");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::write(source_folder.join("program.nc"), "G0 X1").unwrap();
+        std::fs::write(source_folder.join("readme.exe"), "bad").unwrap();
+        std::fs::write(nested.join("notes.txt"), "setup").unwrap();
+        std::fs::write(nested.join("hidden.dll"), "skip").unwrap();
+
+        let result = transfer_file(
+            source_folder.to_string_lossy().to_string(),
+            root.to_string_lossy().to_string(),
+            false,
+            1,
+            Some(vec![".nc".into(), ".txt".into()]),
+            Some(root.to_string_lossy().to_string()),
+        )
+        .await;
+
+        assert_eq!(result.status, TransferFileStatus::Success);
+        assert!(result.is_directory);
+        // Allowed files ARE copied
+        assert_eq!(
+            std::fs::read_to_string(root.join("job").join("program.nc")).unwrap(),
+            "G0 X1"
+        );
+        assert_eq!(
+            std::fs::read_to_string(root.join("job").join("sub").join("notes.txt")).unwrap(),
+            "setup"
+        );
+        // Disallowed files are NOT copied
+        assert!(!root.join("job").join("readme.exe").exists());
+        assert!(!root.join("job").join("sub").join("hidden.dll").exists());
+        // Structured counts
+        assert_eq!(result.copied_count, Some(2));
+        assert_eq!(result.skipped_count, Some(2));
+        // Message mentions skipped files
+        assert!(result.message.contains("skipped"));
 
         let _ = std::fs::remove_dir_all(root);
         let _ = std::fs::remove_dir_all(source_dir);

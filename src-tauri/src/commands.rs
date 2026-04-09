@@ -109,6 +109,23 @@ pub fn cmd_delete_directory_contents(path: String) -> Result<usize, String> {
     delete_directory_contents_at_path(&path)
 }
 
+/// Batch delete multiple entries. Returns summary of deleted/skipped/failed counts.
+#[tauri::command]
+pub fn cmd_delete_entries(paths: Vec<String>) -> Result<(usize, usize, usize), String> {
+    let mut deleted = 0usize;
+    let mut skipped = 0usize;
+    let mut failed = 0usize;
+
+    for path in paths {
+        match delete_entry_at_path(&path) {
+            Ok(_) => deleted += 1,
+            Err(_) => failed += 1,
+        }
+    }
+
+    Ok((deleted, skipped, failed))
+}
+
 /// Open a file or directory in the OS default application (Explorer, PDF viewer, etc.)
 #[tauri::command]
 pub fn cmd_open_external(path: String) -> Result<(), String> {
@@ -251,4 +268,12 @@ fn delete_directory_contents_at_path(path: &str) -> Result<usize, String> {
     }
 
     Ok(deleted_count)
+}
+
+/// Check whether a path points to a directory (folder) or a file.
+/// Returns true if path is a directory, false if it's a file or doesn't exist.
+#[tauri::command]
+pub fn cmd_is_directory(path: String) -> bool {
+    let path = std::path::PathBuf::from(path.trim());
+    path.is_dir()
 }

@@ -64,6 +64,7 @@ const translations: Record<Language, Dict> = {
       "Machine did not respond within the timeout",
     "pane.machineCheckFailed": "Machine availability check failed",
     "pane.machineLoading": "Loading machine folder…",
+    "pane.machineDragOver": "Drop files here to copy to machine",
 
     // Local pane
     "pane.localChooseFolder": "Choose a local work folder",
@@ -109,16 +110,29 @@ const translations: Record<Language, Dict> = {
       "Delete all {count} item(s) in this machine folder?\n\nFolder: {path}\n\nThis cannot be undone.",
     "machine.deleteAllDone": "Deleted {count} item(s) from the machine folder.",
     "machine.deleteAllError": "Delete all failed: {error}",
+    "machine.deleteSelectedConfirm":
+      "Delete {count} selected item(s) from the machine?\n\n{names}\n\nThis cannot be undone.",
+    "machine.deleteSelectedDone": "Delete finished: {deleted} deleted, {skipped} skipped, {failed} failed.",
 
     // Transfer messages
     "transfer.copyingToMachine": "Copying '{name}' to machine folder…",
     "transfer.copyingToLocal": "Copying '{name}' to local folder…",
     "transfer.copyingBatchToMachine":
       "Copying {count} selected item(s) to machine folder…",
+    "transfer.copyingBatchToLocal":
+      "Copying {count} selected item(s) to local folder…",
     "transfer.copiedToMachine": "Copied '{name}' to machine folder.",
     "transfer.copiedToLocal": "Copied '{name}' to local folder.",
+    "transfer.folderFullSuccess":
+      "Copied folder '{name}': {copied} file(s) copied.",
+    "transfer.folderPartialSuccess":
+      "Copied folder '{name}': {copied} file(s) copied, {skipped} skipped (extension not allowed).",
+    "transfer.folderNoneEligible":
+      "Folder '{name}': no files were copied. {skipped} file(s) skipped (extension not allowed).",
     "transfer.batchToMachineSummary":
       "Machine copy finished: {copied} copied, {skipped} skipped, {failed} failed.",
+    "transfer.batchToLocalSummary":
+      "Local copy finished: {copied} copied, {skipped} skipped, {failed} failed.",
     "transfer.cancelled":
       "Copy cancelled. Existing destination content was left unchanged.",
     "transfer.chooseFileFirst":
@@ -293,6 +307,7 @@ const translations: Record<Language, Dict> = {
       "Stroj nije odgovorio u zadanom vremenu",
     "pane.machineCheckFailed": "Provjera dostupnosti stroja neuspješna",
     "pane.machineLoading": "Učitavanje mape stroja…",
+    "pane.machineDragOver": "Ovdje ispustite datoteke za kopiranje na stroj",
 
     // Local pane
     "pane.localChooseFolder": "Odaberite lokalnu radnu mapu",
@@ -301,7 +316,7 @@ const translations: Record<Language, Dict> = {
     "pane.localLoading": "Učitavanje lokalne mape…",
     "pane.localSearching": "Pretraga trenutne mape…",
     "pane.localSearchMinChars":
-      "Unesite najmanje {count} znaka za rekurzivnu pretragu",
+      "Unesite najmanje {count} znakova za rekurzivnu pretragu",
     "pane.localSearchPlaceholder": "Pretraži trenutnu mapu i podmape",
     "pane.localNoMatches": 'Nema rezultata za "{query}" u trenutnoj mapi',
     "pane.dirEmpty": "Mapa je prazna",
@@ -338,16 +353,29 @@ const translations: Record<Language, Dict> = {
       "Obrisati svih {count} stavki u ovoj mapi stroja?\n\nMapa: {path}\n\nOvo se ne može poništiti.",
     "machine.deleteAllDone": "Obrisano {count} stavki iz mape stroja.",
     "machine.deleteAllError": "Brisanje svega neuspješno: {error}",
+    "machine.deleteSelectedConfirm":
+      "Obrisati {count} odabranih stavki sa stroja?\n\n{names}\n\nOvo se ne može poništiti.",
+    "machine.deleteSelectedDone": "Brisanje završeno: {deleted} obrisano, {skipped} preskočeno, {failed} neuspješno.",
 
     // Transfer messages
     "transfer.copyingToMachine": "Kopiranje '{name}' na stroj…",
     "transfer.copyingToLocal": "Kopiranje '{name}' lokalno…",
     "transfer.copyingBatchToMachine":
       "Kopiranje {count} odabranih stavki na stroj…",
+    "transfer.copyingBatchToLocal":
+      "Kopiranje {count} odabranih stavki lokalno…",
     "transfer.copiedToMachine": "Kopirano '{name}' na stroj.",
     "transfer.copiedToLocal": "Kopirano '{name}' lokalno.",
+    "transfer.folderFullSuccess":
+      "Kopirana mapa '{name}': {copied} datoteka kopirano.",
+    "transfer.folderPartialSuccess":
+      "Kopirana mapa '{name}': {copied} datoteka kopirano, {skipped} preskočeno (nedozvoljena ekstenzija).",
+    "transfer.folderNoneEligible":
+      "Mapa '{name}': nijedna datoteka nije kopirana. {skipped} preskočeno (nedozvoljena ekstenzija).",
     "transfer.batchToMachineSummary":
       "Kopiranje na stroj završeno: {copied} kopirano, {skipped} preskočeno, {failed} neuspješno.",
+    "transfer.batchToLocalSummary":
+      "Lokalno kopiranje završeno: {copied} kopirano, {skipped} preskočeno, {failed} neuspješno.",
     "transfer.cancelled":
       "Kopiranje otkazano. Postojeći sadržaj odredišta nije promijenjen.",
     "transfer.chooseFileFirst":

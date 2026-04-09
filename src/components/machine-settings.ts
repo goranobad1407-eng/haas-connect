@@ -127,6 +127,9 @@ export function initMachineSettings(): void {
       normalizeExtensionsInput(inputExtensions().value)
     )
   );
+  inputExtensions().addEventListener("blur", () => {
+    renderForm();
+  });
   inputProtected().addEventListener("change", () =>
     updateSelectedDraft("protected", inputProtected().checked)
   );
@@ -306,7 +309,9 @@ function renderForm(): void {
   inputName().value = draft.name;
   inputType().value = draft.location_type;
   inputPath().value = draft.path;
-  inputExtensions().value = draft.allowed_extensions.join(", ");
+  if (document.activeElement !== inputExtensions()) {
+    inputExtensions().value = draft.allowed_extensions.join(", ");
+  }
   inputProtected().checked = draft.protected;
   inputNotes().value = draft.notes;
 

@@ -16,6 +16,7 @@ class Store {
     machine_breadcrumb: [],
     machine_entries: [],
     selected_machine_entry: null,
+    selected_machine_entries: [],
     local_root: null,
     local_current_path: null,
     local_breadcrumb: [],

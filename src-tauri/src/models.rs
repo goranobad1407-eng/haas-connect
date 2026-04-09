@@ -128,6 +128,12 @@ pub struct TransferFileResult {
     pub file_name: String,
     pub is_directory: bool,
     pub message: String,
+    /// Number of files actually copied (directory transfers only).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub copied_count: Option<usize>,
+    /// Number of files skipped due to disallowed extensions (directory transfers only).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub skipped_count: Option<usize>,
 }
 
 /// Full application config stored in machines.json.

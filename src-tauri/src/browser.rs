@@ -9,6 +9,9 @@ const PREVIEWABLE: &[&str] = &[".nc", ".tap", ".cnc", ".txt", ".pdf"];
 pub const LOCAL_SEARCH_CANCELLED_ERROR: &str = "__local_search_cancelled__";
 static ACTIVE_LOCAL_SEARCH_REQUEST_ID: AtomicU64 = AtomicU64::new(0);
 
+/// Maximum number of search results to return to prevent UI freeze.
+const MAX_SEARCH_RESULTS: usize = 500;
+
 /// List the immediate children of `path`. Non-recursive.
 ///
 /// Rules:
@@ -115,7 +118,9 @@ pub fn search_directory_recursive(
     set_active_local_search_request(request_id);
 
     let mut pending = vec![root.to_path_buf()];
-    let mut matches = Vec::new();
+    let mut matches = Vec::with_capacity(MAX_SEARCH_RESULTS);
+    let mut total_scanned = 0usize;
+    let mut capped = false;
 
     while let Some(dir_path) = pending.pop() {
         if !is_active_local_search_request(request_id) {
@@ -144,13 +149,25 @@ pub fn search_directory_recursive(
 
             let entry_path = entry.path();
             let is_dir = file_type.is_dir();
+
+            // Queue directories for traversal BEFORE checking if this entry matches.
+            // This ensures we search the entire tree even if a folder's name doesn't match.
             if is_dir {
                 pending.push(entry_path.clone());
             }
 
             let name = entry.file_name().to_string_lossy().to_string();
+            total_scanned += 1;
+
+            // Check if entry name matches query (case-insensitive substring)
             if !name.to_lowercase().contains(&normalized_query) {
                 continue;
+            }
+
+            // Respect result cap to keep UI responsive
+            if matches.len() >= MAX_SEARCH_RESULTS {
+                capped = true;
+                continue; // Keep scanning to get accurate total, but don't collect more
             }
 
             let metadata = match entry.metadata() {
@@ -175,9 +192,9 @@ pub fn search_directory_recursive(
             let previewable = !is_dir && is_previewable(&extension);
 
             matches.push(BrowserEntry {
-                name,
+                name: name.clone(),
                 path: full_path,
-                relative_path: relative_parent_path(root, &entry_path),
+                relative_path: relative_entry_path(root, &entry_path, is_dir),
                 is_dir,
                 size,
                 modified,
@@ -191,6 +208,7 @@ pub fn search_directory_recursive(
         return Err(LOCAL_SEARCH_CANCELLED_ERROR.to_string());
     }
 
+    // Sort: folders first, then files; within each group, by relative path then name
     matches.sort_by(|a, b| match (a.is_dir, b.is_dir) {
         (true, false) => std::cmp::Ordering::Less,
         (false, true) => std::cmp::Ordering::Greater,
@@ -203,6 +221,15 @@ pub fn search_directory_recursive(
                 .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
         }
     });
+
+    // Store capped flag and total in thread-local or return via extension? 
+    // For now, log it; UI can infer from result count == MAX_SEARCH_RESULTS
+    if capped {
+        eprintln!(
+            "search_directory_recursive: capped at {} results (scanned {} entries)",
+            MAX_SEARCH_RESULTS, total_scanned
+        );
+    }
 
     Ok(matches)
 }
@@ -219,6 +246,20 @@ fn relative_parent_path(root: &Path, entry_path: &Path) -> Option<String> {
     let parent = entry_path.parent()?;
     let relative = parent.strip_prefix(root).ok()?;
     path_to_relative_string(relative)
+}
+
+/// Compute the relative path for a search result entry.
+/// For folders: returns the path to the folder itself (so user can navigate there).
+/// For files: returns the parent directory path (same as before).
+fn relative_entry_path(root: &Path, entry_path: &Path, is_dir: bool) -> Option<String> {
+    if is_dir {
+        // For folders, show path to the folder itself
+        let relative = entry_path.strip_prefix(root).ok()?;
+        path_to_relative_string(relative)
+    } else {
+        // For files, show parent path (existing behavior)
+        relative_parent_path(root, entry_path)
+    }
 }
 
 fn path_to_relative_string(path: &Path) -> Option<String> {
@@ -268,6 +309,9 @@ mod tests {
 
     #[test]
     fn recursive_search_finds_nested_folders_and_files_case_insensitively() {
+        // Reset global state to prevent interference from other tests
+        set_active_local_search_request(1);
+
         let root = unique_temp_dir("recursive-search-basic");
         let nested = root.join("Jobs").join("403");
         std::fs::create_dir_all(&nested).unwrap();
@@ -293,6 +337,9 @@ mod tests {
 
     #[test]
     fn recursive_search_stays_scoped_to_requested_root() {
+        // Reset global state to prevent interference from other tests
+        set_active_local_search_request(1);
+
         let base = unique_temp_dir("recursive-search-scope");
         let scoped_root = base.join("scope");
         let outside_root = base.join("outside");
@@ -313,6 +360,9 @@ mod tests {
 
     #[test]
     fn recursive_search_uses_none_relative_path_for_direct_children() {
+        // Reset global state to prevent interference from other tests
+        set_active_local_search_request(1);
+
         let root = unique_temp_dir("recursive-search-direct-child");
         std::fs::create_dir_all(&root).unwrap();
         std::fs::write(root.join("403.nc"), "G0").unwrap();
@@ -325,6 +375,153 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(root);
     }
+
+    #[test]
+    fn recursive_search_returns_folders_with_correct_is_dir_flag() {
+        // Reset global state to prevent interference from other tests
+        set_active_local_search_request(1);
+
+        let root = unique_temp_dir("recursive-search-folder-flag");
+        std::fs::create_dir_all(&root).unwrap();
+        let nested = root.join("CNC_Programs").join("2024");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::write(nested.join("part.nc"), "G0 X0").unwrap();
+
+        // Search for "2024" - should find the folder
+        let results =
+            search_directory_recursive(root.to_string_lossy().as_ref(), "2024", 1).unwrap();
+
+        let folder_entry = results.iter().find(|e| e.name == "2024");
+        assert!(
+            folder_entry.is_some(),
+            "Should find folder named '2024', got: {:?}",
+            results
+        );
+        let folder = folder_entry.unwrap();
+        assert!(folder.is_dir, "Folder entry should have is_dir=true");
+        assert_eq!(folder.size, None, "Folders should have size=None");
+        assert_eq!(
+            folder.relative_path.as_deref(),
+            Some("CNC_Programs/2024"),
+            "Folder relative_path should point to the folder itself"
+        );
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn recursive_search_finds_both_files_and_folders() {
+        // Reset global state to prevent interference from other tests
+        set_active_local_search_request(1);
+
+        let root = unique_temp_dir("recursive-search-mixed");
+        // Create structure: root/ProjectA/Jobs/job1.nc
+        let jobs = root.join("ProjectA").join("Jobs");
+        std::fs::create_dir_all(&jobs).unwrap();
+        std::fs::write(jobs.join("job1.nc"), "G0").unwrap();
+        std::fs::write(root.join("ProjectA").join("readme.txt"), "docs").unwrap();
+
+        // Search for "ProjectA" - should find the folder
+        let results =
+            search_directory_recursive(root.to_string_lossy().as_ref(), "ProjectA", 1).unwrap();
+
+        let folder_match = results.iter().find(|e| e.name == "ProjectA" && e.is_dir);
+        assert!(folder_match.is_some(), "Should find folder 'ProjectA'");
+
+        // Search for "job" - should find job1.nc file
+        let results2 =
+            search_directory_recursive(root.to_string_lossy().as_ref(), "job", 2).unwrap();
+        let file_match = results2.iter().find(|e| e.name == "job1.nc" && !e.is_dir);
+        assert!(file_match.is_some(), "Should find file 'job1.nc'");
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn recursive_search_folders_appear_first_in_results() {
+        // Reset global state to prevent interference from other tests
+        set_active_local_search_request(1);
+
+        let root = unique_temp_dir("recursive-search-order");
+        // Create folder and file with same search term
+        let folder = root.join("Alpha");
+        std::fs::create_dir_all(&folder).unwrap();
+        std::fs::write(root.join("Alpha.txt"), "test").unwrap();
+        std::fs::write(folder.join("content.nc"), "G0").unwrap();
+
+        let results =
+            search_directory_recursive(root.to_string_lossy().as_ref(), "alpha", 1).unwrap();
+
+        assert_eq!(results.len(), 2);
+        // Folders should come first
+        assert!(results[0].is_dir, "First result should be a folder");
+        assert!(!results[1].is_dir, "Second result should be a file");
+        assert_eq!(results[0].name, "Alpha");
+        assert_eq!(results[1].name, "Alpha.txt");
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn recursive_search_is_case_insensitive() {
+        // Reset global state to prevent interference from other tests
+        set_active_local_search_request(1);
+
+        let root = unique_temp_dir("recursive-search-case");
+        std::fs::create_dir_all(root.join("UPPERCASE")).unwrap();
+        std::fs::write(root.join("MiXeD.CaSe.NC"), "G0").unwrap();
+        std::fs::write(root.join("lowercase.nc"), "G0").unwrap();
+
+        // Search with lowercase query - should find all variations
+        let results =
+            search_directory_recursive(root.to_string_lossy().as_ref(), "case", 1).unwrap();
+        let names: Vec<&str> = results.iter().map(|e| e.name.as_str()).collect();
+        assert!(names.contains(&"MiXeD.CaSe.NC"), "Should find mixed case file");
+
+        // Search with uppercase query
+        let results2 =
+            search_directory_recursive(root.to_string_lossy().as_ref(), "UPPERCASE", 2).unwrap();
+        assert!(
+            results2.iter().any(|e| e.name == "UPPERCASE" && e.is_dir),
+            "Should find uppercase folder"
+        );
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn recursive_search_respects_max_results_limit() {
+        // Reset global state to prevent interference from other tests
+        set_active_local_search_request(1);
+
+        let root = unique_temp_dir("recursive-search-limit");
+        std::fs::create_dir_all(&root).unwrap();
+        // Create more than MAX_SEARCH_RESULTS files with same pattern
+        // Use fewer extra files on Windows to avoid path length issues
+        let extra_files = 50usize;
+        for i in 0..MAX_SEARCH_RESULTS + extra_files {
+            let filename = format!("part{:04}.nc", i);
+            let filepath = root.join(&filename);
+            std::fs::write(&filepath, "G0").unwrap();
+        }
+
+        let results =
+            search_directory_recursive(root.to_string_lossy().as_ref(), "part", 1).unwrap();
+
+        assert_eq!(
+            results.len(),
+            MAX_SEARCH_RESULTS,
+            "Should cap results at MAX_SEARCH_RESULTS (expected {}, got {})",
+            MAX_SEARCH_RESULTS,
+            results.len()
+        );
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    // Note: Cancellation is tested implicitly by the token-based invalidation in the frontend.
+    // The backend cancellation mechanism uses an atomic that gets reset on each search call,
+    // making it difficult to test in a single-threaded context without race conditions.
 
     fn unique_temp_dir(label: &str) -> std::path::PathBuf {
         std::env::temp_dir().join(format!(

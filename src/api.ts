@@ -93,6 +93,11 @@ export async function deleteEntry(path: string): Promise<void> {
   return invoke<void>("cmd_delete_entry", { path });
 }
 
+/** Batch delete multiple entries. Returns [deleted, skipped, failed] counts. */
+export async function deleteEntries(paths: string[]): Promise<[number, number, number]> {
+  return invoke<[number, number, number]>("cmd_delete_entries", { paths });
+}
+
 /** Delete all contents of a directory without deleting the directory itself. */
 export async function deleteDirectoryContents(path: string): Promise<number> {
   return invoke<number>("cmd_delete_directory_contents", { path });
@@ -119,4 +124,8 @@ export async function transferFile(
     allowedExtensions,
     destinationRoot,
   });
+}
+
+export async function isDirectory(path: string): Promise<boolean> {
+  return invoke<boolean>("cmd_is_directory", { path });
 }

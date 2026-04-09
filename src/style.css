@@ -375,6 +375,45 @@ select,
   background: #fff;
 }
 
+/* Drag and drop visual feedback for machine pane */
+#machine-pane {
+  position: relative;
+}
+
+#machine-pane.drag-over {
+  outline: 4px solid var(--blue);
+  outline-offset: -4px;
+}
+
+#machine-pane.drag-over .pane-list-container {
+  background: var(--blue-light) !important;
+  box-shadow: inset 0 0 0 4px var(--blue);
+}
+
+#machine-pane.drag-over .pane-list-container .placeholder-text {
+  color: var(--blue);
+  font-weight: 700;
+  font-size: 14px;
+}
+
+#machine-pane.drag-over::before {
+  content: "📁 " attr(data-drag-message);
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: var(--blue);
+  color: white;
+  padding: 12px 24px;
+  border-radius: 6px;
+  font-weight: 700;
+  font-size: 14px;
+  z-index: 100;
+  pointer-events: none;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+  white-space: nowrap;
+}
+
 .pane-toolbar {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;

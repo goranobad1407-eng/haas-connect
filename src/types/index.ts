@@ -89,6 +89,8 @@ export interface TransferFileResult {
   file_name: string;
   is_directory: boolean;
   message: string;
+  copied_count?: number;
+  skipped_count?: number;
 }
 
 // Internal app state shape — not serialised.
@@ -102,6 +104,7 @@ export interface AppState {
   machine_breadcrumb: string[];
   machine_entries: BrowserEntry[];
   selected_machine_entry: BrowserEntry | null;
+  selected_machine_entries: BrowserEntry[];
   local_root: string | null;
   local_current_path: string | null;
   local_breadcrumb: string[];
