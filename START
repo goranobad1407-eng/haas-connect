@@ -1,0 +1,25 @@
+1. U VS Code otvori folder:
+A:\CODE\HAAS CONNECT
+
+2. U terminalu MORA pisati:
+A:\CODE\HAAS CONNECT>
+
+Ako ne piše → nisi u dobrom folderu
+
+3. Pokreni app (DEV)
+npm install
+npm run tauri dev
+
+👉 Ovo ti pokrene aplikaciju odmah
+
+🧠 Ako želiš SAMO frontend (brže testiranje UI)
+npm run dev
+📦 Ako želiš napraviti installer
+npm run build:installer
+⚠️ Najčešće greške (da ne gubiš vrijeme)
+❌ Greška 1
+
+Pokrećeš iz pogrešnog foldera
+
+✔ Rješenje:
+→ uđi u A:\CODE\HAAS CONNECT
