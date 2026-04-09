@@ -1,4 +1,4 @@
-import { open } from "@tauri-apps/plugin-dialog";
+import { open, confirm as tauriConfirm } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
 import {
@@ -1722,12 +1722,13 @@ async function retryWithOverwrite(
   const promptKey = result.is_directory
     ? "transfer.overwriteFolderPrompt"
     : "transfer.overwritePrompt";
-  const confirmed = window.confirm(
+  const confirmed = await tauriConfirm(
     t(promptKey, {
       message: result.message,
       name: fileName,
       dest,
-    })
+    }),
+    { title: "HAAS CNC Connect", kind: "warning" }
   );
 
   if (!confirmed) {
@@ -1830,7 +1831,7 @@ export async function confirmAndDeleteMachineEntry(
     });
   }
 
-  const confirmed = window.confirm(confirmMessage);
+  const confirmed = await tauriConfirm(confirmMessage, { title: "HAAS CNC Connect", kind: "warning" });
   if (!confirmed) {
     return;
   }
@@ -1868,11 +1869,12 @@ async function deleteAllMachineFolderContents(): Promise<void> {
     return;
   }
 
-  const confirmed = window.confirm(
+  const confirmed = await tauriConfirm(
     t("machine.deleteAllConfirm", {
       path: currentPath,
       count: String(entryCount),
-    })
+    }),
+    { title: "HAAS CNC Connect", kind: "warning" }
   );
   if (!confirmed) {
     return;

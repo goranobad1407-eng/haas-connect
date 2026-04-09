@@ -1,3 +1,4 @@
+import { confirm as tauriConfirm } from "@tauri-apps/plugin-dialog";
 import {
   checkAvailability,
   loadMachineProfiles,
@@ -91,8 +92,8 @@ export function initMachineSettings(): void {
   openButton().addEventListener("click", () => {
     void openSettings();
   });
-  closeButton().addEventListener("click", () => closeSettings());
-  cancelButton().addEventListener("click", () => closeSettings());
+  closeButton().addEventListener("click", () => { void closeSettings(); });
+  cancelButton().addEventListener("click", () => { void closeSettings(); });
   saveButton().addEventListener("click", () => {
     void saveSettings();
   });
@@ -105,7 +106,7 @@ export function initMachineSettings(): void {
   presetButton().addEventListener("click", () => applyDefaultExtensions());
   modal().addEventListener("click", (event) => {
     if (event.target === modal()) {
-      closeSettings();
+      void closeSettings();
     }
   });
 
@@ -168,10 +169,11 @@ async function openSettings(): Promise<void> {
   }
 }
 
-function closeSettings(): void {
+async function closeSettings(): Promise<void> {
   if (!isOpen) return;
-  if (dirty && !window.confirm(t("settings.machine.discardConfirm"))) {
-    return;
+  if (dirty) {
+    const discard = await tauriConfirm(t("settings.machine.discardConfirm"), { title: "HAAS CNC Connect", kind: "warning" });
+    if (!discard) return;
   }
 
   setModalOpen(false);
@@ -423,7 +425,7 @@ async function saveSettings(): Promise<void> {
       return;
     }
 
-    closeSettings();
+    await closeSettings();
     setStatus(
       t("status.savedMachines", { count: String(config.machines.length) }),
       4000
