@@ -211,9 +211,9 @@ function renderActions(
     topEl.appendChild(openBtn);
   }
 
-  // Delete (only if machine is not protected).
+  // Delete is allowed for machine entries; profile protection only applies in settings.
   const machine = state.get("selected_machine");
-  if (pane === "machine" && machine && !machine.protected) {
+  if (pane === "machine" && machine) {
     const delBtn = document.createElement("button");
     delBtn.className = "btn-action btn-danger";
     delBtn.textContent = t("btn.delete");

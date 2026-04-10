@@ -1085,7 +1085,7 @@ function canDeleteViaContextMenu(
   }
 
   const machine = state.get("selected_machine");
-  return !!machine && !machine.protected;
+  return !!machine;
 }
 
 function canEditViaContextMenu(
@@ -1474,13 +1474,10 @@ function updateTransferButtons(): void {
     : "unknown";
   const selectedLocalEntries = getSelectedLocalEntries();
   const selectedMachineEntries = getSelectedMachineEntries();
-  // Allow delete if we have a machine path and machine is not protected.
+  // Allow delete whenever a machine folder is selected.
   // Do NOT require status === "online"—network paths may show timeout/offline
   // even when operations work. The actual delete will succeed or fail truthfully.
-  const machineDeleteAllowed =
-    !!machine &&
-    !machine.protected &&
-    !!state.get("machine_current_path");
+  const machineDeleteAllowed = !!machine && !!state.get("machine_current_path");
 
   copyToMachineButton().disabled =
     !machine ||
@@ -1831,7 +1828,7 @@ function buildMachineDeleteConfirmMessage(entriesToDelete: BrowserEntry[]): stri
 export async function confirmAndDeleteSelectedMachineEntries(): Promise<void> {
   const machine = state.get("selected_machine");
 
-  if (!machine || machine.protected) {
+  if (!machine) {
     return;
   }
 
@@ -1886,7 +1883,7 @@ async function deleteAllMachineFolderContents(): Promise<void> {
   const currentPath = state.get("machine_current_path");
   const entryCount = state.get("machine_entries").length;
 
-  if (!machine || machine.protected || !currentPath || entryCount === 0) {
+  if (!machine || !currentPath || entryCount === 0) {
     return;
   }
 

@@ -26,6 +26,8 @@ export interface MachineProfile {
   path: string;
   location_type: LocationType;
   allowed_extensions: string[];
+  // Protects the profile from casual removal in settings; does not make the
+  // machine file area read-only.
   protected: boolean;
   notes: string;
 }

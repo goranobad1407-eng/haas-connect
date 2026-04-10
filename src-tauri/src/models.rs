@@ -19,7 +19,8 @@ pub struct MachineProfile {
     pub location_type: LocationType,
     /// File extensions this machine/location is expected to hold.
     pub allowed_extensions: Vec<String>,
-    /// If true, delete operations are blocked for this location.
+    /// If true, the machine profile requires explicit confirmation before removal
+    /// from settings. Normal file browsing/copy/delete operations still work.
     pub protected: bool,
     pub notes: String,
 }
